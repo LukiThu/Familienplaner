@@ -131,15 +131,16 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .daylist{display:flex;flex-direction:column;gap:2px;min-width:0}
 
 .pill{
-  display:flex;align-items:center;gap:5px;width:100%;text-align:left;
-  border:none;background:var(--surface-2);border-radius:5px;
+  display:flex;align-items:center;gap:4px;width:100%;text-align:left;
+  border:none;border-radius:5px;
+  background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));
   padding:3px 6px;font-size:12.5px;line-height:1.3;min-width:0;
-  border-left:3px solid var(--c,var(--line-strong));
 }
-.pill:hover{filter:brightness(.96)}
-.pill .t{font-variant-numeric:tabular-nums;color:var(--muted);flex:none;font-size:11.5px}
+.pill:hover{filter:brightness(1.08)}
+.pill .t{font-variant-numeric:tabular-nums;color:inherit;opacity:.78;flex:none;font-size:11.5px}
 .pill .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.pill .who{flex:none;font-size:11px;font-weight:700;color:var(--c,var(--muted));letter-spacing:.02em}
+/* Nur der blanke Buchstabe — jedes Pixel gehört dem Titel. */
+.pill .who{flex:none;font-size:11.5px;font-weight:800;color:inherit;opacity:.85}
 .more{font-size:11.5px;color:var(--muted);padding:1px 6px;text-align:left;background:none;border:none}
 
 /* ---------- Wochen- und Tagesansicht ---------- */
@@ -155,24 +156,32 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .agenda{display:flex;flex-direction:column;gap:8px;max-width:620px}
 .aitem{
   display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px;align-items:start;
-  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--c,var(--line-strong));
+  background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));border:none;
   border-radius:var(--radius);padding:12px 14px;text-align:left;width:100%;
 }
-.aitem:hover{background:var(--surface-3)}
-.aitem .when{font-size:13.5px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;padding-top:1px}
+.aitem:hover{filter:brightness(1.06)}
+.aitem .when{font-size:13.5px;font-weight:600;color:inherit;opacity:.82;font-variant-numeric:tabular-nums;padding-top:1px}
 .aitem .body{display:flex;flex-direction:column;gap:3px;min-width:0}
 .aitem .title{font-size:16px;font-weight:600;letter-spacing:-.01em}
-.aitem .meta{font-size:13.5px;color:var(--muted)}
-.who-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
-.who-chip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--muted)}
-.who-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+.aitem .meta{font-size:13.5px;color:inherit;opacity:.82}
+.who-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+.who-chip{
+  display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:inherit;
+  background:rgba(128,128,128,.28);
+  background:color-mix(in srgb, currentColor 18%, transparent);
+  border-radius:4px;padding:1px 6px;
+}
 
 .empty{color:var(--muted);font-size:14.5px;padding:14px 2px}
 .railsec{display:flex;flex-direction:column;gap:9px}
 .railsec > h2{margin:0;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.railitem{display:flex;gap:9px;align-items:baseline;font-size:14.5px;border-left:3px solid var(--c,var(--line-strong));padding:2px 0 2px 9px;background:none;border-top:none;border-right:none;border-bottom:none;text-align:left;width:100%}
-.railitem:hover{background:var(--surface-2)}
-.railitem .t{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;min-width:4.5ch}
+.railitem{
+  display:flex;gap:9px;align-items:baseline;font-size:14.5px;border:none;border-radius:6px;
+  background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));
+  padding:4px 9px;text-align:left;width:100%;
+}
+.railitem:hover{filter:brightness(1.06)}
+.railitem .t{font-size:12.5px;color:inherit;opacity:.78;font-variant-numeric:tabular-nums;flex:none;min-width:4.5ch}
 .railitem .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- Dialog ---------- */
@@ -407,16 +416,35 @@ function occurrencesOn(day){
   return occurrencesInRange(startOfDay(day), endOfDay(day));
 }
 
-function colorOf(ev){
-  const ids = (ev.member_ids || []).filter(id => memberById(id));
-  if(ids.length === 1) return memberById(ids[0]).farbe;
-  if(ids.length > 1)   return "var(--accent)";
-  return "var(--line-strong)";
+// Schrift auf Weiß oder Dunkel, je nachdem was auf der gewählten
+// Farbe besser lesbar ist (relative Helligkeit nach WCAG).
+function kontrastfarbe(hex){
+  const h = String(hex).replace("#","");
+  const v = h.length === 3 ? h.split("").map(c => c+c).join("") : h;
+  if(v.length !== 6) return "#FFFFFF";
+  const lin = c => { c = parseInt(c,16)/255; return c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
+  const L = 0.2126*lin(v.slice(0,2)) + 0.7152*lin(v.slice(2,4)) + 0.0722*lin(v.slice(4,6));
+  return L > 0.18 ? "#17201C" : "#FFFFFF";
 }
+
+// Hintergrund und Schrift eines Eintrags: eine Person = ihre Farbe,
+// mehrere = Akzentfarbe, niemand zugeordnet = neutral.
+function farbenOf(ev){
+  const ids = (ev.member_ids || []).filter(id => memberById(id));
+  if(ids.length === 1){
+    const c = memberById(ids[0]).farbe;
+    return "--c-bg:" + c + ";--c-fg:" + kontrastfarbe(c);
+  }
+  if(ids.length > 1) return "--c-bg:var(--accent);--c-fg:var(--accent-text)";
+  return "--c-bg:var(--surface-2);--c-fg:var(--text)";
+}
+
+// Im Kalender steht nur der erste Buchstabe des Kürzels — mehr
+// passt in eine Tageszelle nicht.
 function kuerzelOf(ev){
   const ms = (ev.member_ids || []).map(memberById).filter(Boolean);
   if(ms.length === 0 || ms.length === state.members.length) return "";
-  return ms.map(m => m.kuerzel || m.name.slice(0,2)).join("·");
+  return ms.map(m => (m.kuerzel || m.name).charAt(0).toUpperCase()).join("");
 }
 function zeitText(o){
   if(o.ev.ganztags){
@@ -528,7 +556,7 @@ function topbar(){
 
 function pillHtml(o){
   const k = kuerzelOf(o.ev);
-  return '<button class="pill" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+  return '<button class="pill" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
     (o.ev.ganztags ? "" : '<span class="t">' + hm(o.s) + '</span>') +
     (k ? '<span class="who">' + esc(k) + '</span>' : "") +
     '<span class="n">' + esc(o.ev.titel) + '</span></button>';
@@ -576,13 +604,13 @@ function wochenAnsicht(){
 
 function agendaItem(o){
   const ms = (o.ev.member_ids || []).map(memberById).filter(Boolean);
-  return '<button class="aitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+  return '<button class="aitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
     '<span class="when">' + esc(zeitText(o)) + '</span>' +
     '<span class="body">' +
       '<span class="title">' + esc(o.ev.titel) + '</span>' +
       (o.ev.ort ? '<span class="meta">' + esc(o.ev.ort) + '</span>' : "") +
       (ms.length ? '<span class="who-chips">' + ms.map(m =>
-        '<span class="who-chip" style="--c:' + esc(m.farbe) + '"><span class="dot"></span>' + esc(m.name) + '</span>').join("") + '</span>' : "") +
+        '<span class="who-chip">' + esc(m.name) + '</span>').join("") + '</span>' : "") +
     '</span></button>';
 }
 
@@ -600,7 +628,7 @@ function rail(){
     const occ = occurrencesOn(tag);
     return '<div class="railsec"><h2>' + titel + '</h2>' +
       (occ.length ? occ.map(o =>
-        '<button class="railitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+        '<button class="railitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
           '<span class="t">' + (o.ev.ganztags ? "ganzt." : hm(o.s)) + '</span>' +
           '<span class="n">' + esc(o.ev.titel) + '</span></button>').join("")
         : '<span class="hint">Nichts eingetragen.</span>') +
