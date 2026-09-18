@@ -214,16 +214,17 @@ button.pill:hover{filter:brightness(1.08)}
 .check{display:flex;align-items:center;gap:9px;font-size:15px;min-height:42px}
 .check input{width:19px;height:19px;accent-color:var(--accent)}
 
-.vorlagen{display:flex;gap:7px;flex-wrap:wrap}
-.vchip{
-  display:inline-flex;align-items:center;gap:6px;border:none;border-radius:8px;
+.vliste{display:flex;flex-direction:column;gap:7px;max-height:52vh;overflow-y:auto}
+.vzeile{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
+  border:none;border-radius:var(--radius);text-align:left;
   background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));
-  padding:8px 12px;min-height:42px;font-size:14px;
+  padding:13px 15px;min-height:50px;font-size:15.5px;
 }
-.vchip:hover{filter:brightness(1.08)}
-.vchip .who{font-weight:800;opacity:.85}
-.vchip .n{font-weight:600}
-.vchip .t{font-size:12px;opacity:.78;font-variant-numeric:tabular-nums}
+.vzeile:hover{filter:brightness(1.08)}
+.vzeile .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vzeile .who{font-weight:800;opacity:.8}
+.vzeile .t{flex:none;font-size:13.5px;opacity:.8;font-variant-numeric:tabular-nums}
 .vorlagerow{display:flex;gap:7px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .vorlagerow:last-of-type{border-bottom:none}
 .vorlagerow .nm{flex:2 1 110px;min-width:0}
@@ -351,7 +352,7 @@ const state = {
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
-  dialog:null, settings:false, importer:null, tagDetail:null,
+  dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false,
   authError:null, busy:false, toast:null
 };
 let channel = null, toastTimer = null;
@@ -791,6 +792,7 @@ function render(){
       (state.view==="monat" ? rail() : "") +
     '</div></div>' +
     (state.tagDetail ? dialogTag() : "") +
+    (state.vorlagenListe ? dialogVorlagen() : "") +
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
     (state.importer ? dialogImport() : "") +
@@ -1012,7 +1014,6 @@ function dialogTermin(){
     '<div class="field"><label for="ev-notiz">Notiz</label><textarea id="ev-notiz">' + esc(d.notiz) + '</textarea></div>' +
     '<div class="actions">' +
       (d.id ? '<button class="btn danger" type="button" data-act="loeschen">Löschen</button>' : "") +
-      (d.ganztags ? "" : '<button class="btn ghost" type="button" data-act="vorlage-aus-termin" title="Diesen Termin als Vorlage sichern">Als Vorlage</button>') +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
@@ -1186,6 +1187,28 @@ function sichtbareVorlagen(){
   });
 }
 
+function dialogVorlagen(){
+  const tag = parseYmd(state.tagDetail);
+  const liste = sichtbareVorlagen();
+  return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+    '<h2>Vorlage einsetzen</h2>' +
+    '<p class="small muted">für ' + WDLANG[(tag.getDay()+6)%7] + ', ' + tag.getDate() + '. ' + MONATE[tag.getMonth()] + '</p>' +
+    '<div class="vliste">' +
+      (liste.length
+        ? liste.map(v =>
+            '<button class="vzeile" type="button" data-act="vorlage-setzen" data-id="' + v.id + '" style="' + farbenOf(v) + '">' +
+              '<span class="n">' +
+                (kuerzelOf(v) ? '<span class="who">' + esc(kuerzelOf(v)) + '</span> ' : "") +
+                esc(v.titel) + '</span>' +
+              '<span class="t">' + esc(v.start_zeit) + '–' + esc(v.end_zeit) + '</span>' +
+            '</button>').join("")
+        : '<p class="empty">Keine Vorlagen. Anzulegen in den Einstellungen.</p>') +
+    '</div>' +
+    '<div class="actions"><span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button></div>' +
+  '</div></div>';
+}
+
 function dialogTag(){
   const tag = parseYmd(state.tagDetail);
   const occ = occurrencesOn(tag);
@@ -1196,18 +1219,11 @@ function dialogTag(){
     '<div class="agenda" style="max-width:none">' +
       (occ.length ? occ.map(agendaItem).join("") : '<p class="empty">Keine Termine an diesem Tag.</p>') +
     '</div>' +
-    (sichtbareVorlagen().length
-      ? '<div class="field"><label>Vorlage einsetzen</label><div class="vorlagen">' +
-          sichtbareVorlagen().map(v =>
-            '<button class="vchip" type="button" data-act="vorlage-setzen" data-id="' + v.id + '" style="' + farbenOf(v) + '">' +
-              (kuerzelOf(v) ? '<span class="who">' + esc(kuerzelOf(v)) + '</span>' : "") +
-              '<span class="n">' + esc(v.titel) + '</span>' +
-              '<span class="t">' + esc(v.start_zeit) + '–' + esc(v.end_zeit) + '</span>' +
-            '</button>').join("") +
-        '</div></div>'
-      : "") +
     '<div class="actions">' +
       '<button class="btn" type="button" data-act="tag-neu" data-d="' + esc(state.tagDetail) + '">+ Termin</button>' +
+      (sichtbareVorlagen().length
+        ? '<button class="btn" type="button" data-act="vorlagen-liste">Vorlage …</button>'
+        : "") +
       '<span class="spacer"></span>' +
       '<button class="btn primary" type="button" data-act="schliessen">Schließen</button>' +
     '</div>' +
@@ -1264,7 +1280,7 @@ function overlayChronikLoesen(){
   if(dialogInChronik){ dialogInChronik = false; history.back(); }
 }
 function overlayOffen(){
-  return !!(state.dialog || state.settings || state.importer || state.tagDetail);
+  return !!(state.dialog || state.settings || state.importer || state.tagDetail || state.vorlagenListe);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -1273,15 +1289,17 @@ function chronikPruefen(){
 // Schließt nur die oberste Ebene: aus dem Termin zurück in den Tag,
 // aus dem Tag zurück in den Monat.
 function obersteSchliessen(){
-  if(state.importer)      state.importer = null;
-  else if(state.dialog)   state.dialog = null;
-  else if(state.settings) state.settings = false;
-  else if(state.tagDetail) state.tagDetail = null;
+  if(state.importer)           state.importer = null;
+  else if(state.dialog)        state.dialog = null;
+  else if(state.vorlagenListe) state.vorlagenListe = false;
+  else if(state.settings)      state.settings = false;
+  else if(state.tagDetail)     state.tagDetail = null;
   chronikPruefen();
   render();
 }
 function overlaySchliessen(){
-  state.dialog = null; state.settings = false; state.importer = null; state.tagDetail = null;
+  state.dialog = null; state.settings = false; state.importer = null;
+  state.tagDetail = null; state.vorlagenListe = false;
   overlayChronikLoesen();
   render();
 }
@@ -1289,7 +1307,8 @@ function overlaySchliessen(){
 window.addEventListener("popstate", function(){
   dialogInChronik = false;
   if(overlayOffen()){
-    state.dialog = null; state.settings = false; state.importer = null; state.tagDetail = null;
+    state.dialog = null; state.settings = false; state.importer = null;
+    state.tagDetail = null; state.vorlagenListe = false;
     render();
   }
 });
@@ -1300,6 +1319,9 @@ window.addEventListener("popstate", function(){
 document.addEventListener("click", async function(e){
   const el = e.target.closest("[data-act]");
   if(!el) return;
+  // Ein Wisch löst am Ende auch einen Klick aus — der darf nicht
+  // zusätzlich die Tagesübersicht öffnen.
+  if(Date.now() - wischGerade < 400) return;
   const act = el.dataset.act;
 
   if(act === "backdrop" && e.target === el){ return obersteSchliessen(); }
@@ -1377,10 +1399,10 @@ async function aktion(act, el){
     case "member-neu": return mitgliedAnlegen("person");
     case "kategorie-neu": return mitgliedAnlegen("kategorie");
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "vorlagen-liste": state.vorlagenListe = true; return render();
     case "vorlage-neu":    return vorlageAnlegen();
     case "vorlage-weg":    return vorlageEntfernen(el.dataset.id);
     case "vorlage-setzen": return vorlageEinsetzen(el.dataset.id);
-    case "vorlage-aus-termin": return vorlageAusTermin();
     case "weg-import": return termineLoeschen(true);
     case "weg-alle":   return termineLoeschen(false);
     case "einst-speichern": return einstellungenSpeichern();
@@ -1409,6 +1431,64 @@ document.addEventListener("submit", async function(e){
     render();
   }
 });
+
+/* ---------------------------------------------------------
+   Monat wechseln durch Scrollen beziehungsweise Wischen
+   --------------------------------------------------------- */
+let radSumme = 0, radSperre = 0, radTimer = null;
+let wischStart = null, wischZeit = 0, wischGerade = 0;
+
+function monatWechseln(richtung){
+  state.cursor = addMonths(state.cursor, richtung);
+  render();
+}
+// Nur wechseln, wenn in die gewünschte Richtung nichts mehr zu scrollen
+// ist — sonst ließe sich ein hohes Raster nicht mehr durchsehen.
+function amAnschlag(c, runter){
+  return runter ? (c.scrollTop + c.clientHeight >= c.scrollHeight - 1)
+                : (c.scrollTop <= 0);
+}
+function scrollBereit(e){
+  if(state.view !== "monat" || overlayOffen() || !state.membership) return null;
+  return e.target.closest ? e.target.closest(".content") : null;
+}
+
+document.addEventListener("wheel", function(e){
+  const c = scrollBereit(e);
+  if(!c || !e.deltaY) return;
+  if(!amAnschlag(c, e.deltaY > 0)) return;
+
+  const jetzt = Date.now();
+  if(jetzt < radSperre) return;            // Nachlauf des Trackpads schlucken
+  radSumme += e.deltaY;
+  clearTimeout(radTimer);
+  radTimer = setTimeout(function(){ radSumme = 0; }, 250);
+
+  if(Math.abs(radSumme) >= 50){
+    monatWechseln(radSumme > 0 ? 1 : -1);
+    radSumme = 0;
+    radSperre = jetzt + 400;
+  }
+}, { passive:true });
+
+document.addEventListener("touchstart", function(e){
+  const c = scrollBereit(e);
+  wischStart = (c && e.touches.length === 1) ? e.touches[0].clientY : null;
+  wischZeit = Date.now();
+}, { passive:true });
+
+document.addEventListener("touchend", function(e){
+  const start = wischStart;
+  wischStart = null;
+  if(start === null) return;
+  const c = scrollBereit(e);
+  if(!c || !e.changedTouches || !e.changedTouches.length) return;
+  const weg = start - e.changedTouches[0].clientY;   // nach oben gewischt = positiv
+  if(Math.abs(weg) < 70 || Date.now() - wischZeit > 800) return;
+  if(!amAnschlag(c, weg > 0)) return;
+  wischGerade = Date.now();                          // den folgenden Klick verwerfen
+  monatWechseln(weg > 0 ? 1 : -1);
+}, { passive:true });
 
 document.addEventListener("change", async function(e){
   const el = e.target.closest("[data-act]");
@@ -1600,6 +1680,7 @@ async function vorlageEinsetzen(id){
     const r = await sb.from("events").insert(vorlageZuTermin(v, state.tagDetail));
     if(r.error) throw r.error;
     await neuLaden();
+    state.vorlagenListe = false;
     setToast(v.titel + " eingetragen");
   }catch(err){ setToast("Fehler: " + (err.message || err)); }
   state.busy = false; render();
@@ -1624,24 +1705,6 @@ async function vorlageEntfernen(id){
   const r = await sb.from("templates").delete().eq("id", id);
   if(r.error) return setToast("Fehler: " + r.error.message);
   await neuLaden(); render();
-}
-
-// Aus dem offenen Termin eine Vorlage machen — spart das Abtippen.
-async function vorlageAusTermin(){
-  dialogLesen();
-  const d = state.dialog;
-  if(!d || !d.titel.trim()) return setToast("Bitte zuerst einen Titel eintragen.");
-  if(d.ganztags) return setToast("Vorlagen gibt es nur mit Uhrzeit.");
-  const r = await sb.from("templates").insert({
-    household_id: state.membership.household_id,
-    titel: d.titel.trim(), member_ids: d.member_ids,
-    start_zeit: d.vt, end_zeit: d.bt,
-    sortierung: state.templates.length
-  });
-  if(r.error) return setToast("Fehler: " + r.error.message);
-  await neuLaden();
-  setToast("Als Vorlage gespeichert");
-  render();
 }
 
 async function termineLoeschen(nurImportierte){
