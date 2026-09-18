@@ -794,21 +794,21 @@ document.addEventListener("keydown", function(e){
 });
 
 async function anmelden(){
+  // Erst auslesen, dann neu zeichnen: render() ersetzt die Eingabefelder.
+  const mail = $("#lg-mail").value.trim();
+  const pw   = $("#lg-pw").value;
   state.busy = true; state.authError = null; render();
-  const { error } = await sb.auth.signInWithPassword({
-    email: $("#lg-mail").value.trim(), password: $("#lg-pw").value
-  });
+  const { error } = await sb.auth.signInWithPassword({ email: mail, password: pw });
   state.busy = false;
   if(error){ state.authError = "Anmeldung fehlgeschlagen: " + error.message; render(); }
 }
 
 async function haushaltAnlegen(){
+  const name = ($("#hh-name") ? $("#hh-name").value.trim() : "") || "Familie";
+  const namen = ($("#hh-mitglieder") ? $("#hh-mitglieder").value : "")
+    .split("\n").map(s => s.trim()).filter(Boolean);
   state.busy = true; state.authError = null; render();
   try{
-    const name = ($("#hh-name") ? $("#hh-name").value.trim() : "") || "Familie";
-    const namen = ($("#hh-mitglieder") ? $("#hh-mitglieder").value : "")
-      .split("\n").map(s => s.trim()).filter(Boolean);
-
     const hh = await sb.from("households").insert({ name }).select().single();
     if(hh.error) throw hh.error;
 
@@ -830,9 +830,9 @@ async function haushaltAnlegen(){
 }
 
 async function haushaltBeitreten(){
+  const code = $("#hh-code").value.trim();
   state.busy = true; state.authError = null; render();
   try{
-    const code = $("#hh-code").value.trim();
     if(!code) throw new Error("Bitte den Haushalts-Code eintragen.");
     const ms = await sb.from("memberships").insert({
       user_id: state.session.user.id, household_id: code, rolle: "erwachsen"
@@ -916,26 +916,32 @@ async function mitgliedEntfernen(id){
 }
 
 async function einstellungenSpeichern(){
+  // Alle Felder einsammeln, bevor render() sie ersetzt.
+  const hhName = $("#st-hh") ? $("#st-hh").value.trim() : "";
+  const gelesen = [];
+  document.querySelectorAll(".memberrow").forEach(row=>{
+    const v = f => row.querySelector('[data-f="' + f + '"]');
+    gelesen.push({
+      id: row.dataset.mid,
+      name: v("name").value.trim(),
+      kuerzel: v("kuerzel").value.trim(),
+      farbe: v("farbe").value,
+      ist_kind: v("ist_kind").checked
+    });
+  });
+
   state.busy = true; render();
   try{
-    const hn = $("#st-hh");
-    if(hn && state.household && hn.value.trim() && hn.value.trim() !== state.household.name){
-      const r = await sb.from("households").update({ name: hn.value.trim() }).eq("id", state.household.id);
+    if(hhName && state.household && hhName !== state.household.name){
+      const r = await sb.from("households").update({ name: hhName }).eq("id", state.household.id);
       if(r.error) throw r.error;
     }
-    const rows = document.querySelectorAll(".memberrow");
-    for(const row of rows){
-      const id = row.dataset.mid, m = memberById(id);
+    for(const g of gelesen){
+      const m = memberById(g.id);
       if(!m) continue;
-      const v = f => row.querySelector('[data-f="' + f + '"]');
-      const neu = {
-        name: v("name").value.trim() || m.name,
-        kuerzel: v("kuerzel").value.trim(),
-        farbe: v("farbe").value,
-        ist_kind: v("ist_kind").checked
-      };
+      const neu = { name: g.name || m.name, kuerzel: g.kuerzel, farbe: g.farbe, ist_kind: g.ist_kind };
       if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe || neu.ist_kind !== m.ist_kind){
-        const r = await sb.from("members").update(neu).eq("id", id);
+        const r = await sb.from("members").update(neu).eq("id", g.id);
         if(r.error) throw r.error;
       }
     }
