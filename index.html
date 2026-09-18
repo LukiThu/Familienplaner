@@ -812,21 +812,15 @@ async function haushaltAnlegen(){
     .split("\n").map(s => s.trim()).filter(Boolean);
   state.busy = true; state.authError = null; render();
   try{
-    const hh = await sb.from("households").insert({ name }).select().single();
-    if(hh.error) throw hh.error;
-
-    if(namen.length){
-      const rows = namen.map((n,i) => ({
-        household_id: hh.data.id, name: n,
-        kuerzel: n.slice(0,2), farbe: FARBEN[i % FARBEN.length], sortierung: i
-      }));
-      const mem = await sb.from("members").insert(rows);
-      if(mem.error) throw mem.error;
-    }
-    const ms = await sb.from("memberships").insert({
-      user_id: state.session.user.id, household_id: hh.data.id, rolle: "erwachsen"
+    // Haushalt, Personen und Verknüpfung entstehen in einem Zug in der
+    // Datenbank. Einzeln ginge es nicht: vor dem ersten Haushalt gehört
+    // das Konto zu keinem, und die Zugriffsregeln greifen.
+    const r = await sb.rpc("haushalt_anlegen", {
+      p_name: name,
+      p_mitglieder: namen,
+      p_farben: namen.map((_, i) => FARBEN[i % FARBEN.length])
     });
-    if(ms.error) throw ms.error;
+    if(r.error) throw r.error;
     await loadAll();
   }catch(err){ state.authError = err.message || String(err); }
   state.busy = false; render();
