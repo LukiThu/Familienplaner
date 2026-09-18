@@ -296,6 +296,10 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
 const SUPABASE_URL      = "https://dlafxjemkdzxjrtprncz.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
+// Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
+// stehen — der private Teil liegt ausschließlich in Supabase.
+const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
+
 /* =========================================================
    2. Konstanten und kleine Helfer
    ========================================================= */
@@ -303,6 +307,14 @@ const FARBEN = ["#C2701C","#276E7D","#A8385E","#57489B","#2F6B4F","#8A6D1F","#B2
 const WDS    = ["Mo","Di","Mi","Do","Fr","Sa","So"];
 const WDLANG = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"];
 const MONATE = ["Jänner","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const ERINNERUNG_ZEIT = [
+  ["", "keine"], ["0", "zur Startzeit"], ["5", "5 Minuten vorher"], ["15", "15 Minuten vorher"],
+  ["30", "30 Minuten vorher"], ["60", "1 Stunde vorher"], ["120", "2 Stunden vorher"], ["1440", "1 Tag vorher"]
+];
+// Ganztägige Termine beginnen um 00:00 — negativ heißt: nach Beginn.
+const ERINNERUNG_GANZTAGS = [
+  ["", "keine"], ["-420", "am Tag um 07:00"], ["300", "am Vortag um 19:00"]
+];
 const WDH    = [
   ["keine","einmalig"],
   ["taeglich","täglich"],
@@ -347,7 +359,7 @@ const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
 
 const state = {
   ready:false, session:null, membership:null, household:null,
-  members:[], events:[], templates:[],
+  members:[], events:[], templates:[], reminders:[], push:"unbekannt",
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -387,6 +399,8 @@ async function loadAll(){
   state.members = mem.data || [];
   state.events  = ev.data || [];
   state.templates = tpl.error ? [] : (tpl.data || []);
+  const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
+  state.reminders = rem.error ? [] : (rem.data || []);
   subscribe();
 }
 
@@ -777,6 +791,130 @@ function importVorbereiten(){
 }
 
 /* =========================================================
+   Erinnerungen: Benachrichtigungen auf diesem Gerät
+   ========================================================= */
+
+function b64urlZuBytes(t){
+  const b = (t + "===".slice((t.length + 3) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  const roh = atob(b), out = new Uint8Array(roh.length);
+  for(let i = 0; i < roh.length; i++) out[i] = roh.charCodeAt(i);
+  return out;
+}
+
+async function pushRegistrierung(){
+  if(!("serviceWorker" in navigator)) return null;
+  try{ return await navigator.serviceWorker.register("sw.js"); }
+  catch(e){ return null; }
+}
+
+// Stellt fest, ob dieses Gerät Erinnerungen empfängt — und trägt das Gerät
+// nach, falls es im Browser angemeldet ist, in der Datenbank aber fehlt.
+async function pushPruefen(){
+  if(!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)){
+    state.push = "nicht-unterstuetzt"; return;
+  }
+  if(Notification.permission === "denied"){ state.push = "blockiert"; return; }
+  const reg = await pushRegistrierung();
+  const abo = reg ? await reg.pushManager.getSubscription() : null;
+  state.push = abo ? "an" : "aus";
+  if(abo && state.session && state.membership) await aboSpeichern(abo).catch(() => {});
+}
+
+async function aboSpeichern(abo){
+  const j = abo.toJSON();
+  const r = await sb.from("push_subscriptions").upsert({
+    user_id: state.session.user.id,
+    household_id: state.membership.household_id,
+    endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth,
+    geraet: navigator.userAgent.slice(0, 160)
+  }, { onConflict: "endpoint" });
+  if(r.error) throw r.error;
+}
+
+async function pushEinschalten(){
+  const erlaubt = await Notification.requestPermission();
+  if(erlaubt !== "granted"){
+    await pushPruefen();
+    render();
+    return setToast(erlaubt === "denied"
+      ? "Benachrichtigungen wurden abgelehnt."
+      : "Benachrichtigungen wurden nicht erlaubt.");
+  }
+  state.busy = true; render();
+  try{
+    await pushRegistrierung();
+    const reg = await navigator.serviceWorker.ready;
+    const abo = await reg.pushManager.getSubscription() ||
+      await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlZuBytes(VAPID_PUBLIC) });
+    await aboSpeichern(abo);
+    state.push = "an";
+    setToast("Erinnerungen auf diesem Gerät eingeschaltet");
+  }finally{
+    state.busy = false; render();
+  }
+}
+
+async function pushAusschalten(){
+  state.busy = true; render();
+  try{
+    const reg = await navigator.serviceWorker.getRegistration();
+    const abo = reg ? await reg.pushManager.getSubscription() : null;
+    if(abo){
+      await sb.from("push_subscriptions").delete().eq("endpoint", abo.endpoint);
+      await abo.unsubscribe();
+    }
+    state.push = "aus";
+    setToast("Erinnerungen auf diesem Gerät ausgeschaltet");
+  }finally{
+    state.busy = false; render();
+  }
+}
+
+async function pushTest(){
+  state.busy = true; render();
+  try{
+    const { data, error } = await sb.functions.invoke("erinnerungen", { body: { test: true } });
+    if(error){
+      let grund = error.message || String(error);
+      try{ const b = await error.context.json(); if(b && b.fehler) grund = b.fehler; }catch(_){}
+      throw new Error(grund);
+    }
+    setToast(data && data.gesendet
+      ? "Testnachricht an " + data.gesendet + (data.gesendet === 1 ? " Gerät" : " Geräte") + " geschickt"
+      : "Kein Gerät erreicht — ist die Funktion eingerichtet?");
+  }finally{
+    state.busy = false; render();
+  }
+}
+
+function meineErinnerung(eventId){
+  return state.reminders.find(r => r.event_id === eventId) || null;
+}
+function erinnerungText(vorlauf, ganztags){
+  const liste = ganztags ? ERINNERUNG_GANZTAGS : ERINNERUNG_ZEIT;
+  const t = liste.find(x => x[0] === String(vorlauf));
+  return t ? t[1] : vorlauf + " Minuten vorher";
+}
+
+async function erinnerungSpeichern(eventId, wert){
+  const vorhanden = meineErinnerung(eventId);
+  if(wert === "" || wert == null){
+    if(vorhanden){
+      const r = await sb.from("reminders").delete().eq("id", vorhanden.id);
+      if(r.error) throw r.error;
+    }
+    return;
+  }
+  const r = await sb.from("reminders").upsert({
+    household_id: state.membership.household_id,
+    event_id: eventId,
+    user_id: state.session.user.id,
+    vorlauf_min: parseInt(wert, 10)
+  }, { onConflict: "event_id,user_id" });
+  if(r.error) throw r.error;
+}
+
+/* =========================================================
    8. Darstellung
    ========================================================= */
 function render(){
@@ -945,6 +1083,9 @@ function agendaItem(o){
     '<span class="body">' +
       '<span class="title">' + esc(o.ev.titel) + '</span>' +
       (o.ev.ort ? '<span class="meta">' + esc(o.ev.ort) + '</span>' : "") +
+      (meineErinnerung(o.ev.id)
+        ? '<span class="meta">Erinnerung: ' + esc(erinnerungText(meineErinnerung(o.ev.id).vorlauf_min, o.ev.ganztags)) + '</span>'
+        : "") +
       (ms.length ? '<span class="who-chips">' + ms.map(m =>
         '<span class="who-chip">' + esc(m.name) + '</span>').join("") + '</span>' : "") +
     '</span></button>';
@@ -1010,6 +1151,15 @@ function dialogTermin(){
         '<div class="field"><label for="ev-bis">Endet am (leer = ohne Ende)</label><input id="ev-bis" type="date" value="' + (d.wiederholung_bis || "") + '"></div>') +
     '</div>' +
     (d.id && d.wiederholung !== "keine" ? '<p class="hint">Änderungen gelten für die ganze Serie.</p>' : "") +
+    '<div class="field"><label for="ev-erinnerung">Erinnerung — nur für dich</label>' +
+      '<select id="ev-erinnerung">' +
+        (d.ganztags ? ERINNERUNG_GANZTAGS : ERINNERUNG_ZEIT).map(o =>
+          '<option value="' + o[0] + '"' + (String(d.erinnerung) === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") +
+      '</select>' +
+      (state.push !== "an"
+        ? '<span class="hint">Auf diesem Gerät sind Erinnerungen aus — einschalten in den Einstellungen.</span>'
+        : "") +
+    '</div>' +
     '<div class="field"><label for="ev-ort">Ort</label><input id="ev-ort" type="text" value="' + esc(d.ort) + '"></div>' +
     '<div class="field"><label for="ev-notiz">Notiz</label><textarea id="ev-notiz">' + esc(d.notiz) + '</textarea></div>' +
     '<div class="actions">' +
@@ -1022,6 +1172,29 @@ function dialogTermin(){
 }
 
 /* ---------- Einstellungen ---------- */
+function pushBereich(){
+  const aus = state.busy ? " disabled" : "";
+  switch(state.push){
+    case "an":
+      return '<p class="small">Eingeschaltet. Erinnerungen, die du setzt, kommen hier an.</p>' +
+        '<div class="row" style="justify-content:flex-start">' +
+          '<button class="btn" type="button" data-act="push-test" style="flex:0 0 auto"' + aus + '>Testnachricht</button>' +
+          '<button class="btn ghost" type="button" data-act="push-aus" style="flex:0 0 auto"' + aus + '>Ausschalten</button>' +
+        '</div>';
+    case "aus":
+      return '<p class="small">Aus.</p>' +
+        '<button class="btn" type="button" data-act="push-an" style="align-self:flex-start"' + aus + '>Einschalten</button>' +
+        '<span class="hint">Am Wandtablet nicht nötig — nur auf Geräten, die dich erinnern sollen.</span>';
+    case "blockiert":
+      return '<p class="small">Für diese Seite blockiert.</p>' +
+        '<span class="hint">Im Browser freigeben: Schloss-Symbol neben der Adresse → Berechtigungen → Benachrichtigungen erlauben. Danach die Seite neu laden.</span>';
+    case "nicht-unterstuetzt":
+      return '<p class="small">Dieser Browser kann keine Erinnerungen empfangen.</p>';
+    default:
+      return '<p class="hint">Wird geprüft …</p>';
+  }
+}
+
 function dialogEinstellungen(){
   const zeile = (m, mitKind) =>
     '<div class="memberrow" data-mid="' + m.id + '">' +
@@ -1060,6 +1233,7 @@ function dialogEinstellungen(){
       '<button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button>' +
       '<button class="btn" type="button" data-act="kategorie-neu" style="flex:0 0 auto">+ Kategorie</button>' +
     '</div>' +
+    '<div class="field"><label>Erinnerungen auf diesem Gerät</label>' + pushBereich() + '</div>' +
     '<div class="field"><label>Vorlagen</label>' +
       (vorlagenZeilen || '<p class="hint">Keine. Praktisch für wiederkehrende Dienste — ein Tipp in der Tagesübersicht legt den Termin an.</p>') +
       '<button class="btn" type="button" data-act="vorlage-neu" style="align-self:flex-start;margin-top:8px">+ Vorlage</button></div>' +
@@ -1240,6 +1414,7 @@ function dialogLesen(){
   g("#ev-vd","vd"); g("#ev-bd","bd");
   if(!d.ganztags){ g("#ev-vt","vt"); g("#ev-bt","bt"); }
   const wdh = $("#ev-wdh"); if(wdh) d.wiederholung = wdh.value;
+  const eri = $("#ev-erinnerung"); if(eri) d.erinnerung = eri.value;
   const bis = $("#ev-bis"); d.wiederholung_bis = bis ? (bis.value || null) : d.wiederholung_bis;
 }
 
@@ -1250,7 +1425,8 @@ function neuerDialog(datum, ev){
       id:ev.id, titel:ev.titel, ort:ev.ort||"", notiz:ev.notiz||"",
       ganztags:!!ev.ganztags, vd:ymd(s), vt:hm(s), bd:ymd(e), bt:hm(e),
       wiederholung:ev.wiederholung||"keine", wiederholung_bis:ev.wiederholung_bis||null,
-      member_ids:(ev.member_ids||[]).slice(), error:null
+      member_ids:(ev.member_ids||[]).slice(), error:null,
+      erinnerung: meineErinnerung(ev.id) ? String(meineErinnerung(ev.id).vorlauf_min) : ""
     };
   }
   const d = datum ? parseYmd(datum) : startOfDay(new Date());
@@ -1259,7 +1435,7 @@ function neuerDialog(datum, ev){
   return {
     id:null, titel:"", ort:"", notiz:"", ganztags:false,
     vd:ymd(d), vt:pad(stunde)+":00", bd:ymd(d), bt:pad(Math.min(23,stunde+1))+":00",
-    wiederholung:"keine", wiederholung_bis:null, member_ids:[], error:null
+    wiederholung:"keine", wiederholung_bis:null, member_ids:[], error:null, erinnerung:""
   };
 }
 
@@ -1368,7 +1544,7 @@ async function aktion(act, el){
     case "einstellungen": state.settings = true; overlayOeffnen(); return render();
 
     case "ganztags":
-      dialogLesen(); state.dialog.ganztags = el.checked; return render();
+      dialogLesen(); state.dialog.ganztags = el.checked; state.dialog.erinnerung = ""; return render();
     case "wdh":
       dialogLesen(); return render();
     case "who": {
@@ -1399,6 +1575,9 @@ async function aktion(act, el){
     case "member-neu": return mitgliedAnlegen("person");
     case "kategorie-neu": return mitgliedAnlegen("kategorie");
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "push-an":   return pushEinschalten();
+    case "push-aus":  return pushAusschalten();
+    case "push-test": return pushTest();
     case "vorlagen-liste": state.vorlagenListe = true; return render();
     case "vorlage-neu":    return vorlageAnlegen();
     case "vorlage-weg":    return vorlageEntfernen(el.dataset.id);
@@ -1600,14 +1779,17 @@ async function terminSpeichern(){
 
   state.busy = true; render();
   try{
+    let eventId = d.id;
     if(d.id){
       const r = await sb.from("events").update(daten).eq("id", d.id);
       if(r.error) throw r.error;
     }else{
       daten.created_by = state.session.user.id;
-      const r = await sb.from("events").insert(daten);
+      const r = await sb.from("events").insert(daten).select("id").single();
       if(r.error) throw r.error;
+      eventId = r.data.id;
     }
+    await erinnerungSpeichern(eventId, d.erinnerung);
     state.dialog = null;
     chronikPruefen();
     await neuLaden();
@@ -1848,6 +2030,8 @@ async function neuLaden(){
   if(mem.data) state.members = mem.data;
   if(ev.data)  state.events  = ev.data;
   if(tpl.data) state.templates = tpl.data;
+  const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
+  if(rem.data) state.reminders = rem.data;
 }
 
 /* =========================================================
@@ -1862,6 +2046,7 @@ async function start(){
     catch(err){ state.authError = err.message || String(err); }
   }
   state.ready = true; render();
+  pushPruefen().then(render).catch(() => {});
 
   sb.auth.onAuthStateChange(async (_evt, session)=>{
     const vorher = state.session ? state.session.user.id : null;
