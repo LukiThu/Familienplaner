@@ -115,6 +115,7 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .day{
   background:var(--surface);min-height:104px;padding:5px 5px 7px;
   display:flex;flex-direction:column;gap:3px;text-align:left;border:none;width:100%;
+  font:inherit;color:inherit;cursor:pointer;
 }
 .day:hover{background:var(--surface-3)}
 .day.other .daynum{color:var(--other-month)}
@@ -123,11 +124,10 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .day.weekend.today{background:var(--today)}
 .daynum{
   font-size:13px;font-weight:600;color:var(--muted);
-  padding:1px 5px;border:none;background:none;border-radius:5px;
-  align-self:flex-start;min-width:24px;text-align:left;font-variant-numeric:tabular-nums;
+  padding:1px 5px;border-radius:5px;
+  min-width:24px;text-align:left;font-variant-numeric:tabular-nums;
 }
-.daynum:hover{background:var(--surface-2);color:var(--text)}
-.dayhead{display:flex;align-items:baseline;gap:3px;min-width:0}
+.dayhead{display:flex;align-items:baseline;gap:3px;min-width:0;width:100%}
 /* Feiertage stehen als blanker Text neben der Zahl — kein Pill,
    damit sie den Terminen keinen Platz wegnehmen. */
 .ft{
@@ -136,7 +136,7 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 }
 .ft-gross{font-size:13px;margin:0 0 4px;white-space:normal}
 .day.today .daynum{color:var(--accent);font-weight:700}
-.daylist{display:flex;flex-direction:column;gap:2px;min-width:0}
+.daylist{display:flex;flex-direction:column;gap:2px;min-width:0;width:100%}
 
 .pill{
   display:flex;align-items:center;gap:4px;width:100%;text-align:left;
@@ -144,12 +144,13 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
   background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));
   padding:3px 6px;font-size:12.5px;line-height:1.3;min-width:0;
 }
-.pill:hover{filter:brightness(1.08)}
+button.pill:hover{filter:brightness(1.08)}
+.day:hover .pill{filter:brightness(1.05)}
 .pill .t{font-variant-numeric:tabular-nums;color:inherit;opacity:.78;flex:none;font-size:11.5px}
 .pill .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 /* Nur der blanke Buchstabe — jedes Pixel gehört dem Titel. */
 .pill .who{flex:none;font-size:11.5px;font-weight:800;color:inherit;opacity:.85}
-.more{font-size:11.5px;color:var(--muted);padding:1px 6px;text-align:left;background:none;border:none}
+.more{font-size:11.5px;color:var(--muted);padding:1px 6px;text-align:left;background:none;border:none;display:block}
 
 /* ---------- Wochen- und Tagesansicht ---------- */
 .weekgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
@@ -334,7 +335,7 @@ const state = {
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
-  dialog:null, settings:false, expanded:null, importer:null,
+  dialog:null, settings:false, importer:null, tagDetail:null,
   authError:null, busy:false, toast:null
 };
 let channel = null, toastTimer = null;
@@ -768,6 +769,7 @@ function render(){
       '<div class="content">' + (state.view==="monat" ? monatsAnsicht() : state.view==="woche" ? wochenAnsicht() : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div></div>' +
+    (state.tagDetail ? dialogTag() : "") +
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
     (state.importer ? dialogImport() : "") +
@@ -854,12 +856,17 @@ function topbar(){
   '</div>';
 }
 
-function pillHtml(o){
+// In der Monatsansicht ist die ganze Tageszelle die Schaltfläche; die
+// Pillen sind dort nur Anzeige (klickbar=false), sonst lägen Knöpfe in
+// einem Knopf.
+function pillHtml(o, klickbar){
   const k = kuerzelOf(o.ev);
-  return '<button class="pill" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
+  const tag = klickbar ? "button" : "span";
+  const attr = klickbar ? ' data-act="oeffnen" data-id="' + o.ev.id + '"' : "";
+  return '<' + tag + ' class="pill" ' + attr + ' style="' + farbenOf(o.ev) + '">' +
     (o.ev.ganztags ? "" : '<span class="t">' + hm(o.s) + '</span>') +
     (k ? '<span class="who">' + esc(k) + '</span>' : "") +
-    '<span class="n">' + esc(o.ev.titel) + '</span></button>';
+    '<span class="n">' + esc(o.ev.titel) + '</span></' + tag + '>';
 }
 
 function monatsAnsicht(){
@@ -874,20 +881,21 @@ function monatsAnsicht(){
     const d = addDays(start, i);
     const occ = occurrencesOn(d);
     const key = ymd(d);
-    const zeigen = (state.expanded === key) ? occ : occ.slice(0, maxProTag);
+    const zeigen = occ.slice(0, maxProTag);
     const rest = occ.length - zeigen.length;
     const ft = feiertagAn(d);
-    html += '<div class="day' +
+    html += '<button class="day' +
         (d.getMonth() !== c.getMonth() ? " other" : "") +
         (sameDay(d, heute) ? " today" : "") +
-        ((d.getDay()===0 || d.getDay()===6 || ft) ? " weekend" : "") + '">' +
-      '<div class="dayhead">' +
-        '<button class="daynum" data-act="tag-neu" data-d="' + key + '" title="Termin an diesem Tag anlegen">' + d.getDate() + '</button>' +
-        (ft ? '<span class="ft" title="' + esc(ft) + '">' + esc(ft) + '</span>' : "") +
-      '</div>' +
-      '<div class="daylist">' + zeigen.map(pillHtml).join("") +
-      (rest > 0 ? '<button class="more" data-act="mehr" data-d="' + key + '">+ ' + rest + ' weitere</button>' : "") +
-      '</div></div>';
+        ((d.getDay()===0 || d.getDay()===6 || ft) ? " weekend" : "") + '"' +
+        ' data-act="tag-detail" data-d="' + key + '" title="' + (occ.length ? occ.length + " Termine anzeigen" : "Tag öffnen") + '">' +
+      '<span class="dayhead">' +
+        '<span class="daynum">' + d.getDate() + '</span>' +
+        (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
+      '</span>' +
+      '<span class="daylist">' + zeigen.map(o => pillHtml(o, false)).join("") +
+      (rest > 0 ? '<span class="more">+ ' + rest + ' weitere</span>' : "") +
+      '</span></button>';
   }
   return html + '</div>';
 }
@@ -900,7 +908,7 @@ function wochenAnsicht(){
     html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + '">' +
       '<h3><span>' + WDS[i] + '</span><b>' + d.getDate() + '.</b></h3>' +
       (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
-      (occ.length ? occ.map(pillHtml).join("") : '<span class="hint">—</span>') +
+      (occ.length ? occ.map(o => pillHtml(o, true)).join("") : '<span class="hint">—</span>') +
       '<button class="more" data-act="tag-neu" data-d="' + ymd(d) + '">+ Termin</button>' +
     '</div>';
   }
@@ -1132,6 +1140,24 @@ function dialogImport(){
   '</div></div>';
 }
 
+function dialogTag(){
+  const tag = parseYmd(state.tagDetail);
+  const occ = occurrencesOn(tag);
+  const ft = feiertagAn(tag);
+  return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+    '<h2>' + WDLANG[(tag.getDay()+6)%7] + ', ' + tag.getDate() + '. ' + MONATE[tag.getMonth()] + ' ' + tag.getFullYear() + '</h2>' +
+    (ft ? '<p class="ft ft-gross">' + esc(ft) + '</p>' : "") +
+    '<div class="agenda" style="max-width:none">' +
+      (occ.length ? occ.map(agendaItem).join("") : '<p class="empty">Keine Termine an diesem Tag.</p>') +
+    '</div>' +
+    '<div class="actions">' +
+      '<button class="btn" type="button" data-act="tag-neu" data-d="' + esc(state.tagDetail) + '">+ Termin</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn primary" type="button" data-act="schliessen">Schließen</button>' +
+    '</div>' +
+  '</div></div>';
+}
+
 /* =========================================================
    9. Dialog-Zustand aus Formularfeldern einsammeln
    ========================================================= */
@@ -1181,16 +1207,33 @@ function overlayOeffnen(){
 function overlayChronikLoesen(){
   if(dialogInChronik){ dialogInChronik = false; history.back(); }
 }
+function overlayOffen(){
+  return !!(state.dialog || state.settings || state.importer || state.tagDetail);
+}
+// Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
+function chronikPruefen(){
+  if(!overlayOffen()) overlayChronikLoesen();
+}
+// Schließt nur die oberste Ebene: aus dem Termin zurück in den Tag,
+// aus dem Tag zurück in den Monat.
+function obersteSchliessen(){
+  if(state.importer)      state.importer = null;
+  else if(state.dialog)   state.dialog = null;
+  else if(state.settings) state.settings = false;
+  else if(state.tagDetail) state.tagDetail = null;
+  chronikPruefen();
+  render();
+}
 function overlaySchliessen(){
-  state.dialog = null; state.settings = false; state.importer = null;
+  state.dialog = null; state.settings = false; state.importer = null; state.tagDetail = null;
   overlayChronikLoesen();
   render();
 }
 
 window.addEventListener("popstate", function(){
   dialogInChronik = false;
-  if(state.dialog || state.settings || state.importer){
-    state.dialog = null; state.settings = false; state.importer = null;
+  if(overlayOffen()){
+    state.dialog = null; state.settings = false; state.importer = null; state.tagDetail = null;
     render();
   }
 });
@@ -1203,7 +1246,7 @@ document.addEventListener("click", async function(e){
   if(!el) return;
   const act = el.dataset.act;
 
-  if(act === "backdrop" && e.target === el){ return overlaySchliessen(); }
+  if(act === "backdrop" && e.target === el){ return obersteSchliessen(); }
   if(el.tagName === "FORM") return;
 
   // Ohne diesen Mantel bleibt ein Programmfehler unsichtbar: der Knopf
@@ -1219,17 +1262,17 @@ document.addEventListener("click", async function(e){
 async function aktion(act, el){
   switch(act){
     case "view":
-      state.view = el.dataset.v; localStorage.setItem("fp.view", state.view); state.expanded=null; return render();
+      state.view = el.dataset.v; localStorage.setItem("fp.view", state.view); return render();
     case "prev":
     case "next": {
       const n = act === "prev" ? -1 : 1;
       state.cursor = state.view === "monat" ? addMonths(state.cursor, n)
                    : state.view === "woche" ? addDays(state.cursor, 7*n)
                    : addDays(state.cursor, n);
-      state.expanded = null; return render();
+      return render();
     }
-    case "heute": state.cursor = new Date(); state.expanded=null; return render();
-    case "mehr": state.expanded = (state.expanded === el.dataset.d) ? null : el.dataset.d; return render();
+    case "heute": state.cursor = new Date(); return render();
+    case "tag-detail": state.tagDetail = el.dataset.d; overlayOeffnen(); return render();
     case "filter": {
       const id = el.dataset.id;
       if(state.hidden.has(id)) state.hidden.delete(id); else state.hidden.add(id);
@@ -1243,7 +1286,7 @@ async function aktion(act, el){
       if(ev){ state.dialog = neuerDialog(null, ev); overlayOeffnen(); }
       return render();
     }
-    case "schliessen": return overlaySchliessen();
+    case "schliessen": return obersteSchliessen();
     case "einstellungen": state.settings = true; overlayOeffnen(); return render();
 
     case "ganztags":
@@ -1346,7 +1389,7 @@ document.addEventListener("change", async function(e){
 });
 
 document.addEventListener("keydown", function(e){
-  if(e.key === "Escape" && (state.dialog || state.settings || state.importer)){ overlaySchliessen(); }
+  if(e.key === "Escape" && overlayOffen()){ obersteSchliessen(); }
 });
 
 async function anmelden(){
@@ -1426,7 +1469,7 @@ async function terminSpeichern(){
       if(r.error) throw r.error;
     }
     state.dialog = null;
-    overlayChronikLoesen();
+    chronikPruefen();
     await neuLaden();
     setToast(d.id ? "Termin gespeichert" : "Termin angelegt");
   }catch(err){ state.dialog.error = err.message || String(err); }
@@ -1442,7 +1485,7 @@ async function terminLoeschen(){
     const r = await sb.from("events").delete().eq("id", d.id);
     if(r.error) throw r.error;
     state.dialog = null;
-    overlayChronikLoesen();
+    chronikPruefen();
     await neuLaden();
     setToast("Termin gelöscht");
   }catch(err){ state.dialog.error = err.message || String(err); }
@@ -1533,7 +1576,7 @@ async function einstellungenSpeichern(){
     }
     await neuLaden();
     state.settings = false;
-    overlayChronikLoesen();
+    chronikPruefen();
     setToast("Gespeichert");
   }catch(err){ setToast("Fehler: " + (err.message || err)); }
   state.busy = false; render();
