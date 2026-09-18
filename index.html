@@ -214,6 +214,22 @@ button.pill:hover{filter:brightness(1.08)}
 .check{display:flex;align-items:center;gap:9px;font-size:15px;min-height:42px}
 .check input{width:19px;height:19px;accent-color:var(--accent)}
 
+.vorlagen{display:flex;gap:7px;flex-wrap:wrap}
+.vchip{
+  display:inline-flex;align-items:center;gap:6px;border:none;border-radius:8px;
+  background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));
+  padding:8px 12px;min-height:42px;font-size:14px;
+}
+.vchip:hover{filter:brightness(1.08)}
+.vchip .who{font-weight:800;opacity:.85}
+.vchip .n{font-weight:600}
+.vchip .t{font-size:12px;opacity:.78;font-variant-numeric:tabular-nums}
+.vorlagerow{display:flex;gap:7px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.vorlagerow:last-of-type{border-bottom:none}
+.vorlagerow .nm{flex:2 1 110px;min-width:0}
+.vorlagerow select{flex:1 1 110px;min-width:0}
+.vorlagerow .zt{flex:0 0 108px}
+
 .memberrow{display:flex;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
 .memberrow:last-of-type{border-bottom:none}
 .memberrow .nm{flex:2 1 120px;min-width:0}
@@ -330,7 +346,7 @@ const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
 
 const state = {
   ready:false, session:null, membership:null, household:null,
-  members:[], events:[],
+  members:[], events:[], templates:[],
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -357,10 +373,11 @@ async function loadAll(){
   state.membership = ms.data;
   if(!state.membership){ state.household=null; state.members=[]; state.events=[]; return; }
 
-  const [hh, mem, ev] = await Promise.all([
+  const [hh, mem, ev, tpl] = await Promise.all([
     sb.from("households").select("*").eq("id", state.membership.household_id).maybeSingle(),
     sb.from("members").select("*").eq("household_id", state.membership.household_id).order("sortierung").order("name"),
-    sb.from("events").select("*").eq("household_id", state.membership.household_id).order("start_at")
+    sb.from("events").select("*").eq("household_id", state.membership.household_id).order("start_at"),
+    sb.from("templates").select("*").eq("household_id", state.membership.household_id).order("sortierung").order("titel")
   ]);
   if(hh.error) throw hh.error;
   if(mem.error) throw mem.error;
@@ -368,6 +385,7 @@ async function loadAll(){
   state.household = hh.data;
   state.members = mem.data || [];
   state.events  = ev.data || [];
+  state.templates = tpl.error ? [] : (tpl.data || []);
   subscribe();
 }
 
@@ -376,6 +394,7 @@ function subscribe(){
   channel = sb.channel("fp-" + state.membership.household_id)
     .on("postgres_changes", { event:"*", schema:"public", table:"events" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"members" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"templates" }, refreshQuiet)
     .subscribe();
 }
 let refreshTimer = null;
@@ -384,12 +403,14 @@ function refreshQuiet(){
   refreshTimer = setTimeout(async ()=>{
     try{
       const hid = state.membership.household_id;
-      const [mem, ev] = await Promise.all([
+      const [mem, ev, tpl] = await Promise.all([
         sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
-        sb.from("events").select("*").eq("household_id", hid).order("start_at")
+        sb.from("events").select("*").eq("household_id", hid).order("start_at"),
+        sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
       ]);
       if(!mem.error) state.members = mem.data || [];
       if(!ev.error)  state.events  = ev.data || [];
+      if(!tpl.error) state.templates = tpl.data || [];
       render();
     }catch(e){ /* stiller Abgleich — Fehler beim nächsten Versuch */ }
   }, 250);
@@ -991,6 +1012,7 @@ function dialogTermin(){
     '<div class="field"><label for="ev-notiz">Notiz</label><textarea id="ev-notiz">' + esc(d.notiz) + '</textarea></div>' +
     '<div class="actions">' +
       (d.id ? '<button class="btn danger" type="button" data-act="loeschen">Löschen</button>' : "") +
+      (d.ganztags ? "" : '<button class="btn ghost" type="button" data-act="vorlage-aus-termin" title="Diesen Termin als Vorlage sichern">Als Vorlage</button>') +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
@@ -1013,6 +1035,18 @@ function dialogEinstellungen(){
   const rows = personen().map(m => zeile(m, true)).join("");
   const katRows = kategorien().map(m => zeile(m, false)).join("");
   const importierte = state.events.filter(e => e.extern_uid).length;
+  const vorlagenZeilen = state.templates.map(v =>
+    '<div class="vorlagerow" data-vid="' + v.id + '">' +
+      '<input class="nm" type="text" value="' + esc(v.titel) + '" data-f="titel" aria-label="Titel">' +
+      '<select data-f="member" aria-label="Für wen">' +
+        '<option value=""' + (!v.member_ids.length ? " selected" : "") + '>niemand</option>' +
+        state.members.map(m =>
+          '<option value="' + m.id + '"' + (v.member_ids[0] === m.id ? " selected" : "") + '>' + esc(m.name) + '</option>').join("") +
+      '</select>' +
+      '<input class="zt" type="time" value="' + esc(v.start_zeit) + '" data-f="start_zeit" aria-label="von">' +
+      '<input class="zt" type="time" value="' + esc(v.end_zeit) + '" data-f="end_zeit" aria-label="bis">' +
+      '<button class="btn icon danger" type="button" data-act="vorlage-weg" data-id="' + v.id + '" aria-label="entfernen">✕</button>' +
+    '</div>').join("");
 
   return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
     '<h2>Einstellungen</h2>' +
@@ -1025,6 +1059,9 @@ function dialogEinstellungen(){
       '<button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button>' +
       '<button class="btn" type="button" data-act="kategorie-neu" style="flex:0 0 auto">+ Kategorie</button>' +
     '</div>' +
+    '<div class="field"><label>Vorlagen</label>' +
+      (vorlagenZeilen || '<p class="hint">Keine. Praktisch für wiederkehrende Dienste — ein Tipp in der Tagesübersicht legt den Termin an.</p>') +
+      '<button class="btn" type="button" data-act="vorlage-neu" style="align-self:flex-start;margin-top:8px">+ Vorlage</button></div>' +
     '<div class="field"><label>Aufräumen</label>' +
       '<div class="row" style="justify-content:flex-start">' +
         '<button class="btn" type="button" data-act="weg-import" style="flex:0 0 auto"' + (importierte ? "" : " disabled") + '>' +
@@ -1140,6 +1177,15 @@ function dialogImport(){
   '</div></div>';
 }
 
+// Vorlagen richten sich nach denselben Farbchips wie die Termine.
+function sichtbareVorlagen(){
+  return state.templates.filter(v => {
+    const ids = (v.member_ids || []);
+    if(!ids.length || !state.hidden.size) return true;
+    return ids.some(id => !state.hidden.has(id));
+  });
+}
+
 function dialogTag(){
   const tag = parseYmd(state.tagDetail);
   const occ = occurrencesOn(tag);
@@ -1150,6 +1196,16 @@ function dialogTag(){
     '<div class="agenda" style="max-width:none">' +
       (occ.length ? occ.map(agendaItem).join("") : '<p class="empty">Keine Termine an diesem Tag.</p>') +
     '</div>' +
+    (sichtbareVorlagen().length
+      ? '<div class="field"><label>Vorlage einsetzen</label><div class="vorlagen">' +
+          sichtbareVorlagen().map(v =>
+            '<button class="vchip" type="button" data-act="vorlage-setzen" data-id="' + v.id + '" style="' + farbenOf(v) + '">' +
+              (kuerzelOf(v) ? '<span class="who">' + esc(kuerzelOf(v)) + '</span>' : "") +
+              '<span class="n">' + esc(v.titel) + '</span>' +
+              '<span class="t">' + esc(v.start_zeit) + '–' + esc(v.end_zeit) + '</span>' +
+            '</button>').join("") +
+        '</div></div>'
+      : "") +
     '<div class="actions">' +
       '<button class="btn" type="button" data-act="tag-neu" data-d="' + esc(state.tagDetail) + '">+ Termin</button>' +
       '<span class="spacer"></span>' +
@@ -1321,6 +1377,10 @@ async function aktion(act, el){
     case "member-neu": return mitgliedAnlegen("person");
     case "kategorie-neu": return mitgliedAnlegen("kategorie");
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "vorlage-neu":    return vorlageAnlegen();
+    case "vorlage-weg":    return vorlageEntfernen(el.dataset.id);
+    case "vorlage-setzen": return vorlageEinsetzen(el.dataset.id);
+    case "vorlage-aus-termin": return vorlageAusTermin();
     case "weg-import": return termineLoeschen(true);
     case "weg-alle":   return termineLoeschen(false);
     case "einst-speichern": return einstellungenSpeichern();
@@ -1515,6 +1575,75 @@ async function mitgliedEntfernen(id){
   await neuLaden(); render();
 }
 
+// Aus Start- und Endzeit einen Termin an einem bestimmten Tag bauen.
+// Liegt das Ende vor dem Beginn, ist der Folgetag gemeint (Nachtdienst).
+function vorlageZuTermin(v, datumStr){
+  const tag = parseYmd(datumStr);
+  const start = fromInputs(datumStr, v.start_zeit);
+  let ende = fromInputs(datumStr, v.end_zeit);
+  if(ende <= start) ende = addDays(ende, 1);
+  return {
+    household_id: state.membership.household_id,
+    titel: v.titel, notiz: "", ort: "", ganztags: false,
+    start_at: start.toISOString(), end_at: ende.toISOString(),
+    wiederholung: "keine", wiederholung_bis: null,
+    member_ids: v.member_ids || [],
+    created_by: state.session.user.id
+  };
+}
+
+async function vorlageEinsetzen(id){
+  const v = state.templates.find(x => x.id === id);
+  if(!v || !state.tagDetail) return;
+  state.busy = true; render();
+  try{
+    const r = await sb.from("events").insert(vorlageZuTermin(v, state.tagDetail));
+    if(r.error) throw r.error;
+    await neuLaden();
+    setToast(v.titel + " eingetragen");
+  }catch(err){ setToast("Fehler: " + (err.message || err)); }
+  state.busy = false; render();
+}
+
+async function vorlageAnlegen(){
+  const titel = prompt("Titel der Vorlage, z. B. L1:");
+  if(!titel || !titel.trim()) return;
+  const r = await sb.from("templates").insert({
+    household_id: state.membership.household_id,
+    titel: titel.trim(), member_ids: [],
+    start_zeit: "08:00", end_zeit: "16:00",
+    sortierung: state.templates.length
+  });
+  if(r.error) return setToast("Fehler: " + r.error.message);
+  await neuLaden(); render();
+}
+
+async function vorlageEntfernen(id){
+  const v = state.templates.find(x => x.id === id);
+  if(!v || !confirm("Vorlage „" + v.titel + "“ löschen? Bereits eingetragene Termine bleiben.")) return;
+  const r = await sb.from("templates").delete().eq("id", id);
+  if(r.error) return setToast("Fehler: " + r.error.message);
+  await neuLaden(); render();
+}
+
+// Aus dem offenen Termin eine Vorlage machen — spart das Abtippen.
+async function vorlageAusTermin(){
+  dialogLesen();
+  const d = state.dialog;
+  if(!d || !d.titel.trim()) return setToast("Bitte zuerst einen Titel eintragen.");
+  if(d.ganztags) return setToast("Vorlagen gibt es nur mit Uhrzeit.");
+  const r = await sb.from("templates").insert({
+    household_id: state.membership.household_id,
+    titel: d.titel.trim(), member_ids: d.member_ids,
+    start_zeit: d.vt, end_zeit: d.bt,
+    sortierung: state.templates.length
+  });
+  if(r.error) return setToast("Fehler: " + r.error.message);
+  await neuLaden();
+  setToast("Als Vorlage gespeichert");
+  render();
+}
+
 async function termineLoeschen(nurImportierte){
   const betroffen = nurImportierte
     ? state.events.filter(e => e.extern_uid).length
@@ -1559,6 +1688,21 @@ async function einstellungenSpeichern(){
     });
   });
 
+  const vorlagen = [];
+  document.querySelectorAll(".vorlagerow").forEach(row=>{
+    const v = f => row.querySelector('[data-f="' + f + '"]');
+    const alt = state.templates.find(x => x.id === row.dataset.vid);
+    if(!alt) return;
+    const mid = v("member") ? v("member").value : "";
+    vorlagen.push({
+      id: alt.id,
+      titel: v("titel") ? v("titel").value.trim() || alt.titel : alt.titel,
+      member_ids: mid ? [mid] : [],
+      start_zeit: v("start_zeit") ? v("start_zeit").value : alt.start_zeit,
+      end_zeit:   v("end_zeit")   ? v("end_zeit").value   : alt.end_zeit
+    });
+  });
+
   state.busy = true; render();
   try{
     if(hhName && state.household && hhName !== state.household.name){
@@ -1571,6 +1715,18 @@ async function einstellungenSpeichern(){
       const neu = { name: g.name || m.name, kuerzel: g.kuerzel, farbe: g.farbe, ist_kind: g.ist_kind };
       if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe || neu.ist_kind !== m.ist_kind){
         const r = await sb.from("members").update(neu).eq("id", g.id);
+        if(r.error) throw r.error;
+      }
+    }
+    for(const g of vorlagen){
+      const alt = state.templates.find(x => x.id === g.id);
+      if(!alt) continue;
+      if(g.titel !== alt.titel || g.start_zeit !== alt.start_zeit || g.end_zeit !== alt.end_zeit ||
+         (g.member_ids[0] || "") !== (alt.member_ids[0] || "")){
+        const r = await sb.from("templates").update({
+          titel: g.titel, member_ids: g.member_ids,
+          start_zeit: g.start_zeit, end_zeit: g.end_zeit
+        }).eq("id", g.id);
         if(r.error) throw r.error;
       }
     }
@@ -1619,14 +1775,16 @@ async function importAusfuehren(){
 
 async function neuLaden(){
   const hid = state.membership.household_id;
-  const [hh, mem, ev] = await Promise.all([
+  const [hh, mem, ev, tpl] = await Promise.all([
     sb.from("households").select("*").eq("id", hid).maybeSingle(),
     sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
-    sb.from("events").select("*").eq("household_id", hid).order("start_at")
+    sb.from("events").select("*").eq("household_id", hid).order("start_at"),
+    sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
   ]);
   if(hh.data)  state.household = hh.data;
   if(mem.data) state.members = mem.data;
   if(ev.data)  state.events  = ev.data;
+  if(tpl.data) state.templates = tpl.data;
 }
 
 /* =========================================================
