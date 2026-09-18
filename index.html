@@ -485,7 +485,13 @@ function occurrencesInRange(from, to){
   return out;
 }
 function occurrencesOn(day){
-  return occurrencesInRange(startOfDay(day), endOfDay(day));
+  const von = startOfDay(day);
+  return occurrencesInRange(von, endOfDay(day)).filter(o =>
+    // Ganztägige Termine spannen sich über alle ihre Tage. Ein Termin
+    // mit Uhrzeit steht nur an seinem Anfangstag — sonst klebt der
+    // Nachtdienst von 19:00 bis 07:00 auch am nächsten Morgen im Kalender.
+    o.ev.ganztags || startOfDay(o.s).getTime() === von.getTime()
+  );
 }
 
 // Schrift auf Weiß oder Dunkel, je nachdem was auf der gewählten
@@ -513,9 +519,14 @@ function farbenOf(ev){
 
 // Im Kalender steht nur der erste Buchstabe des Kürzels — mehr
 // passt in eine Tageszelle nicht.
+function personen(){   return state.members.filter(m => m.art !== "kategorie"); }
+function kategorien(){ return state.members.filter(m => m.art === "kategorie"); }
+
 function kuerzelOf(ev){
   const ms = (ev.member_ids || []).map(memberById).filter(Boolean);
-  if(ms.length === 0 || ms.length === state.members.length) return "";
+  if(ms.length === 0) return "";
+  // Betrifft alle Personen: dann sagt der Buchstabe nichts mehr.
+  if(ms.length === personen().length && ms.every(m => m.art !== "kategorie")) return "";
   return ms.map(m => (m.kuerzel || m.name).charAt(0).toUpperCase()).join("");
 }
 function zeitText(o){
@@ -523,7 +534,10 @@ function zeitText(o){
     const tage = Math.round((startOfDay(o.e) - startOfDay(o.s)) / 86400000) + 1;
     return tage > 1 ? "ganztägig, " + tage + " Tage" : "ganztägig";
   }
-  return hm(o.s) + (sameDay(o.s,o.e) && hm(o.e) !== hm(o.s) ? "–" + hm(o.e) : "");
+  if(sameDay(o.s, o.e)) return hm(o.s) + (hm(o.e) !== hm(o.s) ? "–" + hm(o.e) : "");
+  // Endet an einem anderen Tag: "19:00–07:00 +1"
+  const tage = Math.round((startOfDay(o.e) - startOfDay(o.s)) / 86400000);
+  return hm(o.s) + "–" + hm(o.e) + " +" + tage;
 }
 
 /* =========================================================
@@ -935,9 +949,11 @@ function rail(){
 /* ---------- Termin-Dialog ---------- */
 function dialogTermin(){
   const d = state.dialog;
-  const whos = state.members.map(m =>
+  const knopf = m =>
     '<button type="button" data-act="who" data-id="' + m.id + '" aria-pressed="' + (d.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
-      '<span class="dot"></span>' + esc(m.name) + '</button>').join("");
+      '<span class="dot"></span>' + esc(m.name) + '</button>';
+  const whos = personen().map(knopf).join("");
+  const kats = kategorien().map(knopf).join("");
 
   return '<div class="backdrop" data-act="backdrop"><form class="modal" data-act="speichern">' +
     '<h2>' + (d.id ? "Termin bearbeiten" : "Neuer Termin") + '</h2>' +
@@ -945,6 +961,7 @@ function dialogTermin(){
     '<div class="field"><label for="ev-titel">Titel</label><input id="ev-titel" type="text" value="' + esc(d.titel) + '" required></div>' +
     '<div class="field"><label>Für wen</label><div class="whopick">' + (whos || '<span class="hint">Noch keine Familienmitglieder angelegt.</span>') + '</div>' +
       '<span class="hint">Nichts ausgewählt heißt: betrifft alle.</span></div>' +
+    (kats ? '<div class="field"><label>Kategorie</label><div class="whopick">' + kats + '</div></div>' : "") +
     '<label class="check"><input type="checkbox" data-act="ganztags"' + (d.ganztags ? " checked" : "") + '> Ganztägig</label>' +
     '<div class="row">' +
       '<div class="field"><label for="ev-vd">Von</label><input id="ev-vd" type="date" value="' + d.vd + '" required></div>' +
@@ -975,21 +992,39 @@ function dialogTermin(){
 
 /* ---------- Einstellungen ---------- */
 function dialogEinstellungen(){
-  const rows = state.members.map(m =>
+  const zeile = (m, mitKind) =>
     '<div class="memberrow" data-mid="' + m.id + '">' +
       '<input class="nm" type="text" value="' + esc(m.name) + '" data-f="name" aria-label="Name">' +
       '<input class="kz" type="text" value="' + esc(m.kuerzel) + '" data-f="kuerzel" maxlength="4" aria-label="Kürzel">' +
       '<input type="color" value="' + esc(m.farbe) + '" data-f="farbe" aria-label="Farbe">' +
-      '<label class="kid"><input type="checkbox" data-f="ist_kind"' + (m.ist_kind ? " checked" : "") + '> Kind</label>' +
+      (mitKind
+        ? '<label class="kid"><input type="checkbox" data-f="ist_kind"' + (m.ist_kind ? " checked" : "") + '> Kind</label>'
+        : '') +
       '<button class="btn icon danger" type="button" data-act="member-weg" data-id="' + m.id + '" aria-label="entfernen">✕</button>' +
-    '</div>').join("");
+    '</div>';
+  const rows = personen().map(m => zeile(m, true)).join("");
+  const katRows = kategorien().map(m => zeile(m, false)).join("");
+  const importierte = state.events.filter(e => e.extern_uid).length;
 
   return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
     '<h2>Einstellungen</h2>' +
     '<div class="field"><label for="st-hh">Haushalt</label>' +
       '<input id="st-hh" type="text" value="' + esc(state.household ? state.household.name : "") + '"></div>' +
     '<div class="field"><label>Familienmitglieder</label>' + (rows || '<p class="hint">Noch niemand angelegt.</p>') + '</div>' +
-    '<div class="row"><button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button></div>' +
+    '<div class="field"><label>Kategorien</label>' +
+      (katRows || '<p class="hint">Keine. Praktisch für Termine, die keiner Person gehören — etwa Geburtstage.</p>') + '</div>' +
+    '<div class="row" style="justify-content:flex-start">' +
+      '<button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button>' +
+      '<button class="btn" type="button" data-act="kategorie-neu" style="flex:0 0 auto">+ Kategorie</button>' +
+    '</div>' +
+    '<div class="field"><label>Aufräumen</label>' +
+      '<div class="row" style="justify-content:flex-start">' +
+        '<button class="btn" type="button" data-act="weg-import" style="flex:0 0 auto"' + (importierte ? "" : " disabled") + '>' +
+          'Importierte löschen (' + importierte + ')</button>' +
+        '<button class="btn danger" type="button" data-act="weg-alle" style="flex:0 0 auto"' + (state.events.length ? "" : " disabled") + '>' +
+          'Alle Termine löschen (' + state.events.length + ')</button>' +
+      '</div>' +
+      '<span class="hint">Beides ist endgültig. Praktisch, wenn ein Import nicht so ausgefallen ist wie gedacht.</span></div>' +
     '<div class="field"><label>Aus einem anderen Kalender übernehmen</label>' +
       '<button class="btn" type="button" data-act="import-oeffnen" style="align-self:flex-start">Kalender importieren …</button>' +
       '<span class="hint">Liest eine .ics-Datei, etwa den Export aus Google Kalender.</span></div>' +
@@ -1229,8 +1264,11 @@ document.addEventListener("click", async function(e){
       localStorage.setItem("fp.feiertage", state.feiertage ? "1" : "0");
       return render();
     case "loeschen":   return terminLoeschen();
-    case "member-neu": return mitgliedAnlegen();
+    case "member-neu": return mitgliedAnlegen("person");
+    case "kategorie-neu": return mitgliedAnlegen("kategorie");
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "weg-import": return termineLoeschen(true);
+    case "weg-alle":   return termineLoeschen(false);
     case "einst-speichern": return einstellungenSpeichern();
     case "logout":
       if(channel){ sb.removeChannel(channel); channel=null; }
@@ -1394,14 +1432,16 @@ async function terminLoeschen(){
   state.busy = false; render();
 }
 
-async function mitgliedAnlegen(){
-  const name = prompt("Name der Person:");
+async function mitgliedAnlegen(art){
+  const istKategorie = art === "kategorie";
+  const name = prompt(istKategorie ? "Name der Kategorie, z. B. Geburtstag:" : "Name der Person:");
   if(!name || !name.trim()) return;
   const n = name.trim();
   const r = await sb.from("members").insert({
     household_id: state.membership.household_id, name: n,
     kuerzel: n.slice(0,2), farbe: FARBEN[state.members.length % FARBEN.length],
-    sortierung: state.members.length
+    sortierung: state.members.length,
+    art: istKategorie ? "kategorie" : "person"
   });
   if(r.error) return setToast("Fehler: " + r.error.message);
   await neuLaden(); render();
@@ -1413,6 +1453,31 @@ async function mitgliedEntfernen(id){
   const r = await sb.from("members").delete().eq("id", id);
   if(r.error) return setToast("Fehler: " + r.error.message);
   await neuLaden(); render();
+}
+
+async function termineLoeschen(nurImportierte){
+  const betroffen = nurImportierte
+    ? state.events.filter(e => e.extern_uid).length
+    : state.events.length;
+  if(!betroffen) return;
+
+  const frage = nurImportierte
+    ? betroffen + " importierte Termine löschen? Von Hand angelegte bleiben erhalten."
+    : "Wirklich ALLE " + betroffen + " Termine im Haushalt „" + (state.household ? state.household.name : "") + "“ löschen?";
+  if(!confirm(frage + "\n\nDas lässt sich nicht rückgängig machen.")) return;
+
+  state.busy = true; render();
+  try{
+    let q = sb.from("events").delete().eq("household_id", state.membership.household_id);
+    if(nurImportierte) q = q.not("extern_uid", "is", null);
+    const r = await q;
+    if(r.error) throw r.error;
+    await neuLaden();
+    setToast(betroffen + " Termine gelöscht");
+  }catch(err){
+    setToast("Fehler: " + (err.message || err));
+  }
+  state.busy = false; render();
 }
 
 async function einstellungenSpeichern(){
