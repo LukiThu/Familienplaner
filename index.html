@@ -27,6 +27,10 @@
 /* Chromes "Zum Aktualisieren ziehen" abschalten: die Geste gehört hier
    dem Monatswechsel. Gilt nur, wenn es am html-Element steht. */
 html,body{height:100%;overscroll-behavior:none}
+/* Der App-Rahmen ist genau so hoch wie der sichtbare Bildschirm — dadurch
+   scrollt der Kalender in sich, statt die ganze Seite mitzuziehen.
+   dvh folgt der ein- und ausfahrenden Adressleiste am Handy. */
+#app{height:100%;height:100dvh}
 body{
   margin:0; background:var(--bg); color:var(--text);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -1618,7 +1622,14 @@ document.addEventListener("submit", async function(e){
    Monat wechseln durch Scrollen beziehungsweise Wischen
    --------------------------------------------------------- */
 let radSumme = 0, radSperre = 0, radTimer = null;
-let wischStart = null, wischZeit = 0, wischGerade = 0;
+let wischStart = null, wischZeit = 0, wischGerade = 0, wischRand = null;
+let zuletztGescrollt = 0, radLetzteLage = null;
+
+// Merkt sich, wann der Kalender zuletzt tatsächlich gescrollt hat.
+// scroll-Ereignisse steigen nicht auf, daher in der Einfangphase lauschen.
+document.addEventListener("scroll", function(e){
+  if(e.target && e.target.classList && e.target.classList.contains("content")) zuletztGescrollt = Date.now();
+}, true);
 
 function monatWechseln(richtung){
   state.cursor = addMonths(state.cursor, richtung);
@@ -1638,9 +1649,17 @@ function scrollBereit(e){
 document.addEventListener("wheel", function(e){
   const c = scrollBereit(e);
   if(!c || !e.deltaY) return;
-  if(!amAnschlag(c, e.deltaY > 0)) return;
+  if(!amAnschlag(c, e.deltaY > 0)){ radSumme = 0; radLetzteLage = c.scrollTop; zuletztGescrollt = Date.now(); return; }
 
   const jetzt = Date.now();
+  // Zweiter, von Scroll-Ereignissen unabhängiger Hinweis: Hat sich die
+  // Position seit dem letzten Raddreh verändert, ist der Kalender noch
+  // in Bewegung.
+  if(radLetzteLage !== null && c.scrollTop !== radLetzteLage) zuletztGescrollt = jetzt;
+  radLetzteLage = c.scrollTop;
+  // Hat der Kalender eben noch gescrollt, ist das dieselbe Bewegung, die ihn
+  // an den Rand gebracht hat — die darf nicht gleich den Monat wechseln.
+  if(jetzt - zuletztGescrollt < 350){ radSumme = 0; return; }
   if(jetzt < radSperre) return;            // Nachlauf des Trackpads schlucken
   radSumme += e.deltaY;
   clearTimeout(radTimer);
@@ -1657,6 +1676,9 @@ document.addEventListener("touchstart", function(e){
   const c = scrollBereit(e);
   wischStart = (c && e.touches.length === 1) ? e.touches[0].clientY : null;
   wischZeit = Date.now();
+  // Entscheidend ist, wo der Kalender beim Aufsetzen des Fingers stand —
+  // nicht, wo er nach dem Scrollen landet.
+  wischRand = c ? { oben: amAnschlag(c, false), unten: amAnschlag(c, true) } : null;
 }, { passive:true });
 
 document.addEventListener("touchend", function(e){
@@ -1667,7 +1689,9 @@ document.addEventListener("touchend", function(e){
   if(!c || !e.changedTouches || !e.changedTouches.length) return;
   const weg = start - e.changedTouches[0].clientY;   // nach oben gewischt = positiv
   if(Math.abs(weg) < 70 || Date.now() - wischZeit > 800) return;
-  if(!amAnschlag(c, weg > 0)) return;
+  // Nur wechseln, wenn der Kalender schon beim Aufsetzen am Rand stand.
+  // Sonst hat dieser Wisch gescrollt, und erst der nächste blättert weiter.
+  if(!wischRand || !(weg > 0 ? wischRand.unten : wischRand.oben)) return;
   wischGerade = Date.now();                          // den folgenden Klick verwerfen
   monatWechseln(weg > 0 ? 1 : -1);
 }, { passive:true });
