@@ -1206,6 +1206,17 @@ document.addEventListener("click", async function(e){
   if(act === "backdrop" && e.target === el){ return overlaySchliessen(); }
   if(el.tagName === "FORM") return;
 
+  // Ohne diesen Mantel bleibt ein Programmfehler unsichtbar: der Knopf
+  // tut dann einfach nichts, und man sucht an der falschen Stelle.
+  try{
+    return await aktion(act, el);
+  }catch(err){
+    state.busy = false;
+    setToast("Fehler: " + (err && err.message ? err.message : err));
+  }
+});
+
+async function aktion(act, el){
   switch(act){
     case "view":
       state.view = el.dataset.v; localStorage.setItem("fp.view", state.view); state.expanded=null; return render();
@@ -1277,17 +1288,23 @@ document.addEventListener("click", async function(e){
       overlayChronikLoesen();
       return render();
   }
-});
+}
 
 document.addEventListener("submit", async function(e){
   const form = e.target.closest("[data-act]");
   if(!form) return;
   e.preventDefault();
   const act = form.dataset.act;
-  if(act === "login")             return anmelden();
-  if(act === "speichern")         return terminSpeichern();
-  if(act === "haushalt-neu")      return haushaltAnlegen();
-  if(act === "haushalt-beitreten")return haushaltBeitreten();
+  try{
+    if(act === "login")             return await anmelden();
+    if(act === "speichern")         return await terminSpeichern();
+    if(act === "haushalt-neu")      return await haushaltAnlegen();
+    if(act === "haushalt-beitreten")return await haushaltBeitreten();
+  }catch(err){
+    state.busy = false;
+    state.authError = (err && err.message) ? err.message : String(err);
+    render();
+  }
 });
 
 document.addEventListener("change", async function(e){
@@ -1486,12 +1503,16 @@ async function einstellungenSpeichern(){
   const gelesen = [];
   document.querySelectorAll(".memberrow").forEach(row=>{
     const v = f => row.querySelector('[data-f="' + f + '"]');
+    const m = memberById(row.dataset.mid);
+    if(!m) return;
+    // Kategoriezeilen haben kein Kind-Häkchen — fehlende Felder behalten
+    // den bisherigen Wert, statt den Lesevorgang abzubrechen.
     gelesen.push({
-      id: row.dataset.mid,
-      name: v("name").value.trim(),
-      kuerzel: v("kuerzel").value.trim(),
-      farbe: v("farbe").value,
-      ist_kind: v("ist_kind").checked
+      id: m.id,
+      name:    v("name")     ? v("name").value.trim()    : m.name,
+      kuerzel: v("kuerzel")  ? v("kuerzel").value.trim() : m.kuerzel,
+      farbe:   v("farbe")    ? v("farbe").value          : m.farbe,
+      ist_kind: v("ist_kind") ? v("ist_kind").checked    : m.ist_kind
     });
   });
 
