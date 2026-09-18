@@ -1621,15 +1621,9 @@ document.addEventListener("submit", async function(e){
 /* ---------------------------------------------------------
    Monat wechseln durch Scrollen beziehungsweise Wischen
    --------------------------------------------------------- */
-let radSumme = 0, radSperre = 0, radTimer = null;
+let radSumme = 0, radSperre = 0, radLetzte = 0, radGeste = null;
 let wischStart = null, wischZeit = 0, wischGerade = 0, wischRand = null;
-let zuletztGescrollt = 0, radLetzteLage = null;
-
-// Merkt sich, wann der Kalender zuletzt tatsächlich gescrollt hat.
-// scroll-Ereignisse steigen nicht auf, daher in der Einfangphase lauschen.
-document.addEventListener("scroll", function(e){
-  if(e.target && e.target.classList && e.target.classList.contains("content")) zuletztGescrollt = Date.now();
-}, true);
+let zuletztGescrollt = 0, bekannteLage = null, bekannterBereich = null;
 
 function monatWechseln(richtung){
   state.cursor = addMonths(state.cursor, richtung);
@@ -1645,30 +1639,41 @@ function scrollBereit(e){
   if(state.view !== "monat" || overlayOffen() || !state.membership) return null;
   return e.target.closest ? e.target.closest(".content") : null;
 }
+// Merkt sich, wann sich der Kalender zuletzt wirklich bewegt hat. Ein
+// Scroll-Ereignis ohne Positionsänderung zählt nicht (kommt vor, wenn der
+// Browser Ereignisse verspätet ausliefert).
+function lageMelden(c){
+  // Ein neu gezeichneter Kalenderbereich (erster Aufruf, Monatswechsel) wird
+  // nur vermerkt — dass er an einer anderen Stelle steht, ist keine Bewegung.
+  if(c !== bekannterBereich){ bekannterBereich = c; bekannteLage = c.scrollTop; return; }
+  if(c.scrollTop !== bekannteLage){ bekannteLage = c.scrollTop; zuletztGescrollt = Date.now(); }
+}
+document.addEventListener("scroll", function(e){
+  if(e.target && e.target.classList && e.target.classList.contains("content")) lageMelden(e.target);
+}, true);
 
 document.addEventListener("wheel", function(e){
   const c = scrollBereit(e);
   if(!c || !e.deltaY) return;
-  if(!amAnschlag(c, e.deltaY > 0)){ radSumme = 0; radLetzteLage = c.scrollTop; zuletztGescrollt = Date.now(); return; }
-
   const jetzt = Date.now();
-  // Zweiter, von Scroll-Ereignissen unabhängiger Hinweis: Hat sich die
-  // Position seit dem letzten Raddreh verändert, ist der Kalender noch
-  // in Bewegung.
-  if(radLetzteLage !== null && c.scrollTop !== radLetzteLage) zuletztGescrollt = jetzt;
-  radLetzteLage = c.scrollTop;
-  // Hat der Kalender eben noch gescrollt, ist das dieselbe Bewegung, die ihn
-  // an den Rand gebracht hat — die darf nicht gleich den Monat wechseln.
-  if(jetzt - zuletztGescrollt < 350){ radSumme = 0; return; }
-  if(jetzt < radSperre) return;            // Nachlauf des Trackpads schlucken
-  radSumme += e.deltaY;
-  clearTimeout(radTimer);
-  radTimer = setTimeout(function(){ radSumme = 0; }, 250);
+  lageMelden(c);
+  // Eine neue Radbewegung beginnt, wenn das Rad eine Viertelsekunde still war.
+  // Blättern darf nur eine Bewegung, die schon am Rand beginnt, während der
+  // Kalender ruht — wie beim Wischen. Der Nachlauf eines Trackpads, das den
+  // Kalender eben erst an den Rand geschoben hat, blättert so nie.
+  if(jetzt - radLetzte > 250){
+    radGeste = { darf: amAnschlag(c, e.deltaY > 0) && jetzt - zuletztGescrollt > 300 };
+    radSumme = 0;
+  }
+  radLetzte = jetzt;
+  if(!radGeste.darf || jetzt < radSperre || !amAnschlag(c, e.deltaY > 0)) return;
 
+  radSumme += e.deltaY;
   if(Math.abs(radSumme) >= 50){
     monatWechseln(radSumme > 0 ? 1 : -1);
     radSumme = 0;
     radSperre = jetzt + 400;
+    radGeste.darf = false;            // eine Bewegung blättert höchstens einen Monat
   }
 }, { passive:true });
 
