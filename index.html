@@ -717,14 +717,44 @@ function neuerDialog(datum, ev){
 }
 
 /* =========================================================
-   8. Aktionen
+   8. Zurück-Taste: schließt den Dialog statt die Seite zu verlassen
+   ========================================================= */
+let dialogInChronik = false;
+
+// Beim Öffnen einen Eintrag anlegen — die Adresse bleibt unverändert.
+function overlayOeffnen(){
+  if(!dialogInChronik){
+    try{ history.pushState({ fpDialog:true }, ""); dialogInChronik = true; }
+    catch(e){ /* ohne Chronik funktioniert alles weiter, nur ohne Zurück-Taste */ }
+  }
+}
+// Den Eintrag wieder abräumen, wenn der Dialog auf anderem Weg zugeht.
+function overlayChronikLoesen(){
+  if(dialogInChronik){ dialogInChronik = false; history.back(); }
+}
+function overlaySchliessen(){
+  state.dialog = null; state.settings = false;
+  overlayChronikLoesen();
+  render();
+}
+
+window.addEventListener("popstate", function(){
+  dialogInChronik = false;
+  if(state.dialog || state.settings){
+    state.dialog = null; state.settings = false;
+    render();
+  }
+});
+
+/* =========================================================
+   9. Aktionen
    ========================================================= */
 document.addEventListener("click", async function(e){
   const el = e.target.closest("[data-act]");
   if(!el) return;
   const act = el.dataset.act;
 
-  if(act === "backdrop" && e.target === el){ state.dialog=null; state.settings=false; return render(); }
+  if(act === "backdrop" && e.target === el){ return overlaySchliessen(); }
   if(el.tagName === "FORM") return;
 
   switch(act){
@@ -746,15 +776,15 @@ document.addEventListener("click", async function(e){
       localStorage.setItem("fp.hidden", JSON.stringify([...state.hidden]));
       return render();
     }
-    case "neu": state.dialog = neuerDialog(state.view === "tag" ? ymd(state.cursor) : null); return render();
-    case "tag-neu": state.dialog = neuerDialog(el.dataset.d); return render();
+    case "neu": state.dialog = neuerDialog(state.view === "tag" ? ymd(state.cursor) : null); overlayOeffnen(); return render();
+    case "tag-neu": state.dialog = neuerDialog(el.dataset.d); overlayOeffnen(); return render();
     case "oeffnen": {
       const ev = state.events.find(x => x.id === el.dataset.id);
-      if(ev) state.dialog = neuerDialog(null, ev);
+      if(ev){ state.dialog = neuerDialog(null, ev); overlayOeffnen(); }
       return render();
     }
-    case "schliessen": state.dialog=null; state.settings=false; return render();
-    case "einstellungen": state.settings = true; return render();
+    case "schliessen": return overlaySchliessen();
+    case "einstellungen": state.settings = true; overlayOeffnen(); return render();
 
     case "ganztags":
       dialogLesen(); state.dialog.ganztags = el.checked; return render();
@@ -774,6 +804,7 @@ document.addEventListener("click", async function(e){
       if(channel){ sb.removeChannel(channel); channel=null; }
       await sb.auth.signOut();
       state.session=null; state.membership=null; state.settings=false;
+      overlayChronikLoesen();
       return render();
   }
 });
@@ -790,7 +821,7 @@ document.addEventListener("submit", async function(e){
 });
 
 document.addEventListener("keydown", function(e){
-  if(e.key === "Escape" && (state.dialog || state.settings)){ state.dialog=null; state.settings=false; render(); }
+  if(e.key === "Escape" && (state.dialog || state.settings)){ overlaySchliessen(); }
 });
 
 async function anmelden(){
@@ -870,6 +901,7 @@ async function terminSpeichern(){
       if(r.error) throw r.error;
     }
     state.dialog = null;
+    overlayChronikLoesen();
     await neuLaden();
     setToast(d.id ? "Termin gespeichert" : "Termin angelegt");
   }catch(err){ state.dialog.error = err.message || String(err); }
@@ -885,6 +917,7 @@ async function terminLoeschen(){
     const r = await sb.from("events").delete().eq("id", d.id);
     if(r.error) throw r.error;
     state.dialog = null;
+    overlayChronikLoesen();
     await neuLaden();
     setToast("Termin gelöscht");
   }catch(err){ state.dialog.error = err.message || String(err); }
@@ -944,6 +977,7 @@ async function einstellungenSpeichern(){
     }
     await neuLaden();
     state.settings = false;
+    overlayChronikLoesen();
     setToast("Gespeichert");
   }catch(err){ setToast("Fehler: " + (err.message || err)); }
   state.busy = false; render();
@@ -962,7 +996,7 @@ async function neuLaden(){
 }
 
 /* =========================================================
-   9. Start
+   10. Start
    ========================================================= */
 async function start(){
   if(!sb){ render(); return; }
