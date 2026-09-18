@@ -11,6 +11,7 @@
   --text:#17201C; --muted:#66716A; --line:#D9E0D9; --line-strong:#BCC7BC;
   --accent:#2F6B4F; --accent-soft:#E2EDE5; --accent-text:#FFFFFF;
   --danger:#A9522A; --today:#F7DFB5; --other-month:#9AA69C;
+  --feiertag-bg:#FBE9E6; --feiertag-text:#A13D33;
   --radius:10px;
   --shadow:0 1px 2px rgba(23,32,28,.07), 0 10px 30px -20px rgba(23,32,28,.45);
 }
@@ -20,6 +21,7 @@
     --text:#E5EBE3; --muted:#98A399; --line:#2B322C; --line-strong:#3D453D;
     --accent:#78C398; --accent-soft:#1E2B23; --accent-text:#10170F;
     --danger:#D9895C; --today:#3F3414; --other-month:#5D665E;
+    --feiertag-bg:#3A2322; --feiertag-text:#F0A097;
     --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -20px rgba(0,0,0,.9);
   }
 }
@@ -129,6 +131,10 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .day.today{background:var(--today)}
 .day.weekend{background:var(--surface-3)}
 .day.weekend.today{background:var(--today)}
+/* Feiertage wie im gedruckten Kalender: rot. Heute bleibt Bernstein. */
+.day.feiertag{background:var(--feiertag-bg)}
+.day.feiertag.today{background:var(--today)}
+.day.feiertag .daynum{color:var(--feiertag-text)}
 .daynum{
   font-size:13px;font-weight:600;color:var(--muted);
   padding:1px 5px;border-radius:5px;
@@ -138,7 +144,7 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 /* Feiertage stehen als blanker Text neben der Zahl — kein Pill,
    damit sie den Terminen keinen Platz wegnehmen. */
 .ft{
-  font-size:10.5px;font-weight:600;color:var(--accent);letter-spacing:.01em;
+  font-size:10.5px;font-weight:600;color:var(--feiertag-text);letter-spacing:.01em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
 }
 .ft-gross{font-size:13px;margin:0 0 4px;white-space:normal}
@@ -163,6 +169,8 @@ button.pill:hover{filter:brightness(1.08)}
 .weekgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
 @media (max-width:900px){ .weekgrid{grid-template-columns:1fr} }
 .daycol{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px;display:flex;flex-direction:column;gap:7px;min-height:130px}
+.daycol.feiertag{background:var(--feiertag-bg)}
+.daycol.feiertag > h3, .daycol.feiertag > h3 b{color:var(--feiertag-text)}
 .daycol.today{border-color:var(--accent)}
 .daycol > h3{margin:0;font-size:13px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .daycol.today > h3{color:var(--accent)}
@@ -1055,7 +1063,7 @@ function monatsAnsicht(){
     html += '<button class="day' +
         (d.getMonth() !== c.getMonth() ? " other" : "") +
         (sameDay(d, heute) ? " today" : "") +
-        ((d.getDay()===0 || d.getDay()===6 || ft) ? " weekend" : "") + '"' +
+        (ft ? " feiertag" : (d.getDay()===0 || d.getDay()===6) ? " weekend" : "") + '"' +
         ' data-act="tag-detail" data-d="' + key + '" title="' + (occ.length ? occ.length + " Termine anzeigen" : "Tag öffnen") + '">' +
       '<span class="dayhead">' +
         '<span class="daynum">' + d.getDate() + '</span>' +
@@ -1073,7 +1081,7 @@ function wochenAnsicht(){
   let html = '<div class="weekgrid">';
   for(let i=0;i<7;i++){
     const d = addDays(mo,i), occ = occurrencesOn(d), ft = feiertagAn(d);
-    html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + '">' +
+    html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + (ft ? " feiertag" : "") + '">' +
       '<h3><span>' + WDS[i] + '</span><b>' + d.getDate() + '.</b></h3>' +
       (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
       (occ.length ? occ.map(o => pillHtml(o, true)).join("") : '<span class="hint">—</span>') +
