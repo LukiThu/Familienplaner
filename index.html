@@ -127,6 +127,14 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
   align-self:flex-start;min-width:24px;text-align:left;font-variant-numeric:tabular-nums;
 }
 .daynum:hover{background:var(--surface-2);color:var(--text)}
+.dayhead{display:flex;align-items:baseline;gap:3px;min-width:0}
+/* Feiertage stehen als blanker Text neben der Zahl — kein Pill,
+   damit sie den Terminen keinen Platz wegnehmen. */
+.ft{
+  font-size:10.5px;font-weight:600;color:var(--accent);letter-spacing:.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+}
+.ft-gross{font-size:13px;margin:0 0 4px;white-space:normal}
 .day.today .daynum{color:var(--accent);font-weight:700}
 .daylist{display:flex;flex-direction:column;gap:2px;min-width:0}
 
@@ -210,6 +218,23 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 .memberrow .nm{flex:2 1 120px;min-width:0}
 .memberrow .kz{flex:0 0 68px}
 .memberrow .kid{flex:none;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap}
+.bilanz{display:flex;gap:10px;flex-wrap:wrap}
+.bilanz > div{
+  flex:1 1 90px;background:var(--surface-2);border-radius:8px;padding:10px 12px;
+  display:flex;flex-direction:column;gap:1px;
+}
+.bilanz b{font-size:21px;line-height:1.1;font-variant-numeric:tabular-nums}
+.bilanz span{font-size:12px;color:var(--muted)}
+.praefix{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line)}
+.praefix:last-of-type{border-bottom:none}
+.pbuchstabe{
+  flex:none;width:30px;height:30px;border-radius:7px;background:var(--accent);color:var(--accent-text);
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;
+}
+.pzahl{flex:none;font-size:12.5px;color:var(--muted);min-width:4ch;font-variant-numeric:tabular-nums}
+.praefix select{flex:1 1 auto;min-width:0}
+input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed var(--line-strong);border-radius:8px;background:var(--surface)}
+
 .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all;background:var(--surface-2);padding:9px 11px;border-radius:8px}
 
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:11px 17px;border-radius:9px;font-size:14.5px;z-index:60;box-shadow:var(--shadow)}
@@ -308,7 +333,8 @@ const state = {
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
-  dialog:null, settings:false, expanded:null,
+  feiertage: localStorage.getItem("fp.feiertage") !== "0",
+  dialog:null, settings:false, expanded:null, importer:null,
   authError:null, busy:false, toast:null
 };
 let channel = null, toastTimer = null;
@@ -369,8 +395,57 @@ function refreshQuiet(){
 }
 
 /* =========================================================
-   5. Termine: Serien auflösen
+   5. Österreichische Feiertage — gerechnet, nicht nachgeschlagen
    ========================================================= */
+
+// Osterformel nach Meeus/Jones/Butcher; daran hängen fünf Feiertage.
+function ostersonntag(jahr){
+  const a = jahr % 19, b = Math.floor(jahr/100), c = jahr % 100;
+  const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25), g = Math.floor((b-f+1)/3);
+  const h = (19*a + b - d - g + 15) % 30, i = Math.floor(c/4), k = c % 4;
+  const l = (32 + 2*e + 2*i - h - k) % 7, m = Math.floor((a + 11*h + 22*l)/451);
+  const monat = Math.floor((h + l - 7*m + 114)/31), tag = ((h + l - 7*m + 114) % 31) + 1;
+  return new Date(jahr, monat-1, tag);
+}
+
+const feiertagsCache = {};
+function feiertageDesJahres(jahr){
+  if(feiertagsCache[jahr]) return feiertagsCache[jahr];
+  const o = ostersonntag(jahr), map = {};
+  const setz = (d, name) => { map[ymd(d)] = name; };
+  setz(new Date(jahr,0,1),   "Neujahr");
+  setz(new Date(jahr,0,6),   "Heilige Drei Könige");
+  setz(addDays(o,1),         "Ostermontag");
+  setz(new Date(jahr,4,1),   "Staatsfeiertag");
+  setz(addDays(o,39),        "Christi Himmelfahrt");
+  setz(addDays(o,50),        "Pfingstmontag");
+  setz(addDays(o,60),        "Fronleichnam");
+  setz(new Date(jahr,7,15),  "Mariä Himmelfahrt");
+  setz(new Date(jahr,9,26),  "Nationalfeiertag");
+  setz(new Date(jahr,10,1),  "Allerheiligen");
+  setz(new Date(jahr,11,8),  "Mariä Empfängnis");
+  setz(new Date(jahr,11,25), "Christtag");
+  setz(new Date(jahr,11,26), "Stefanitag");
+  feiertagsCache[jahr] = map;
+  return map;
+}
+function feiertagAn(d){
+  if(!state.feiertage) return null;
+  return feiertageDesJahres(d.getFullYear())[ymd(d)] || null;
+}
+
+/* =========================================================
+   6. Termine: Serien auflösen
+   ========================================================= */
+function naechsteWiederholung(d, art){
+  if(art === "taeglich")              return addDays(d,1);
+  if(art === "woechentlich")          return addDays(d,7);
+  if(art === "zweiwoechentlich")      return addDays(d,14);
+  if(art === "monatlich")             return addMonths(d,1);
+  if(art === "jaehrlich")             return addYears(d,1);
+  return null;
+}
+
 function occurrences(ev, from, to){
   const out = [];
   const s0 = new Date(ev.start_at), e0 = new Date(ev.end_at);
@@ -386,12 +461,9 @@ function occurrences(ev, from, to){
     if(cur > to) break;
     const e = new Date(cur.getTime() + dur);
     if(e >= from) out.push({ ev, s:new Date(cur), e });
-    if(ev.wiederholung === "taeglich")              cur = addDays(cur,1);
-    else if(ev.wiederholung === "woechentlich")     cur = addDays(cur,7);
-    else if(ev.wiederholung === "zweiwoechentlich") cur = addDays(cur,14);
-    else if(ev.wiederholung === "monatlich")        cur = addMonths(cur,1);
-    else if(ev.wiederholung === "jaehrlich")        cur = addYears(cur,1);
-    else break;
+    const weiter = naechsteWiederholung(cur, ev.wiederholung);
+    if(!weiter) break;
+    cur = weiter;
   }
   return out;
 }
@@ -455,7 +527,220 @@ function zeitText(o){
 }
 
 /* =========================================================
-   6. Darstellung
+   7. Kalender-Import aus einer .ics-Datei
+   ========================================================= */
+
+const WOCHENTAG_ICS = { SU:0, MO:1, TU:2, WE:3, TH:4, FR:5, SA:6 };
+// Ein Buchstabe, dann ein Trennzeichen, dann der eigentliche Titel.
+const PRAEFIX_MUSTER = /^([A-Za-zÄÖÜäöüß])[\s:.\-]+(.+)$/;
+
+function icsText(roh){
+  return String(roh)
+    .replace(/\\n/gi, "\n").replace(/\\,/g, ",")
+    .replace(/\\;/g, ";").replace(/\\\\/g, "\\").trim();
+}
+
+function icsParse(text){
+  // Gefaltete Zeilen wieder zusammensetzen (RFC 5545).
+  const zeilen = text.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n");
+  const out = [];
+  let cur = null;
+  for(const z of zeilen){
+    const zz = z.trim();
+    if(zz === "BEGIN:VEVENT"){ cur = {}; continue; }
+    if(zz === "END:VEVENT"){ if(cur) out.push(cur); cur = null; continue; }
+    if(!cur) continue;
+    const dp = zz.indexOf(":");
+    if(dp < 0) continue;
+    const teile = zz.slice(0, dp).split(";");
+    const name = teile[0].toUpperCase();
+    const params = {};
+    teile.slice(1).forEach(t => {
+      const g = t.indexOf("=");
+      if(g > 0) params[t.slice(0,g).toUpperCase()] = t.slice(g+1).replace(/^"|"$/g, "");
+    });
+    const eintrag = { wert: zz.slice(dp+1), params };
+    if(cur[name]) cur[name].push(eintrag); else cur[name] = [eintrag];
+  }
+  return out;
+}
+
+// Zeitzonen sauber umrechnen, statt sie zu ignorieren.
+function zonenVersatz(zeitpunkt, zone){
+  const f = new Intl.DateTimeFormat("en-US", { timeZone: zone, hour12:false,
+    year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit" });
+  const p = {};
+  f.formatToParts(zeitpunkt).forEach(x => { p[x.type] = x.value; });
+  return Date.UTC(+p.year, +p.month-1, +p.day, (+p.hour) % 24, +p.minute, +p.second) - zeitpunkt.getTime();
+}
+function ausZone(y, mo, t, h, mi, sek, zone){
+  try{
+    const naiv = Date.UTC(y, mo-1, t, h, mi, sek);
+    let ts = naiv - zonenVersatz(new Date(naiv), zone);
+    ts = naiv - zonenVersatz(new Date(ts), zone);
+    return new Date(ts);
+  }catch(e){
+    return new Date(y, mo-1, t, h, mi, sek);
+  }
+}
+
+function icsDatum(eintrag){
+  if(!eintrag) return null;
+  const w = String(eintrag.wert).trim(), p = eintrag.params || {};
+  if(p.VALUE === "DATE" || /^\d{8}$/.test(w)){
+    return { d: new Date(+w.slice(0,4), +w.slice(4,6)-1, +w.slice(6,8)), ganztags: true };
+  }
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/.exec(w);
+  if(!m) return null;
+  const y=+m[1], mo=+m[2], t=+m[3], h=+m[4], mi=+m[5], sek=+m[6];
+  if(m[7])   return { d: new Date(Date.UTC(y, mo-1, t, h, mi, sek)), ganztags:false };
+  if(p.TZID) return { d: ausZone(y, mo, t, h, mi, sek, p.TZID), ganztags:false };
+  return { d: new Date(y, mo-1, t, h, mi, sek), ganztags:false };
+}
+
+function rruleParse(w){
+  const o = {};
+  String(w).split(";").forEach(t => {
+    const g = t.indexOf("=");
+    if(g > 0) o[t.slice(0,g).toUpperCase()] = t.slice(g+1);
+  });
+  return o;
+}
+
+// Bildet die Google-Regel auf unsere fünf Muster ab und sagt dazu,
+// was dabei verloren geht.
+function serieAbbilden(rr, start){
+  const freq = String(rr.FREQ || "").toUpperCase();
+  const iv = parseInt(rr.INTERVAL || "1", 10) || 1;
+  const res = { art:"keine", bis:null, starts:[new Date(start)], marken:[""], hinweise:[] };
+
+  if(freq === "DAILY"){
+    if(iv === 1) res.art = "taeglich";
+    else if(iv === 7) res.art = "woechentlich";
+    else if(iv === 14) res.art = "zweiwoechentlich";
+    else { res.art = "taeglich"; res.hinweise.push("alle " + iv + " Tage → täglich"); }
+  }else if(freq === "WEEKLY"){
+    res.art = (iv === 2) ? "zweiwoechentlich" : "woechentlich";
+    if(iv > 2) res.hinweise.push("alle " + iv + " Wochen → wöchentlich");
+    const tage = String(rr.BYDAY || "").split(",").map(x => x.trim()).filter(Boolean)
+      .map(x => WOCHENTAG_ICS[x.slice(-2).toUpperCase()]).filter(n => n !== undefined);
+    if(tage.length > 1){
+      res.starts = tage.map(wt => addDays(new Date(start), (wt - start.getDay() + 7) % 7));
+      res.marken = tage.map(wt => "#" + wt);
+      res.hinweise.push("mehrere Wochentage → " + tage.length + " getrennte Serien");
+    }
+  }else if(freq === "MONTHLY"){
+    res.art = "monatlich";
+    if(rr.BYDAY) res.hinweise.push("Regel „" + rr.BYDAY + "“ → monatlich am " + start.getDate() + ".");
+  }else if(freq === "YEARLY"){
+    res.art = "jaehrlich";
+  }else if(freq){
+    res.hinweise.push("Wiederholung „" + freq + "“ nicht abbildbar → Einzeltermin");
+  }
+
+  if(rr.UNTIL){
+    const u = icsDatum({ wert: rr.UNTIL, params:{} });
+    if(u) res.bis = ymd(u.d);
+  }else if(rr.COUNT){
+    const n = parseInt(rr.COUNT, 10);
+    if(n > 0 && res.art !== "keine"){
+      let d = new Date(start);
+      for(let i = 1; i < n; i++){
+        const w = naechsteWiederholung(d, res.art);
+        if(!w) break;
+        d = w;
+      }
+      res.bis = ymd(d);
+    }
+  }
+  return res;
+}
+
+// Welche Anfangsbuchstaben kommen als Präfix überhaupt vor?
+function praefixeErkennen(roh){
+  const zaehler = {};
+  roh.forEach(v => {
+    const titel = icsText(v.SUMMARY ? v.SUMMARY[0].wert : "");
+    const m = PRAEFIX_MUSTER.exec(titel);
+    if(m){
+      const b = m[1].toUpperCase();
+      zaehler[b] = (zaehler[b] || 0) + 1;
+    }
+  });
+  return zaehler;
+}
+
+// Aus den geparsten Einträgen die fertigen Datensätze bauen.
+function importVorbereiten(){
+  const im = state.importer;
+  const ab = im.abDatum ? parseYmd(im.abDatum) : null;
+  const rows = [], hinweise = [], uebersprungen = { serienausnahme:0, abgesagt:0, ohneDatum:0, ausserhalb:0 };
+
+  im.roh.forEach(v => {
+    if(v["RECURRENCE-ID"]){ uebersprungen.serienausnahme++; return; }
+    if(v.STATUS && /CANCELLED/i.test(v.STATUS[0].wert)){ uebersprungen.abgesagt++; return; }
+
+    const dts = icsDatum(v.DTSTART ? v.DTSTART[0] : null);
+    if(!dts){ uebersprungen.ohneDatum++; return; }
+
+    let dte = icsDatum(v.DTEND ? v.DTEND[0] : null);
+    let ende;
+    if(dte){
+      // Bei ganztägigen Terminen ist DTEND in ICS der Tag danach.
+      ende = dts.ganztags ? endOfDay(addDays(dte.d, -1)) : dte.d;
+    }else{
+      ende = dts.ganztags ? endOfDay(dts.d) : new Date(dts.d.getTime() + 60*60*1000);
+    }
+    if(ende < dts.d) ende = dts.ganztags ? endOfDay(dts.d) : new Date(dts.d.getTime() + 60*60*1000);
+
+    let titel = icsText(v.SUMMARY ? v.SUMMARY[0].wert : "") || "(ohne Titel)";
+    let mitglieder = [];
+    const pm = PRAEFIX_MUSTER.exec(titel);
+    if(pm){
+      const regel = im.praefixe[pm[1].toUpperCase()];
+      if(regel && regel !== "lassen"){
+        titel = pm[2].trim() || titel;
+        if(regel !== "entfernen" && memberById(regel)) mitglieder = [regel];
+      }
+    }
+
+    const rr = v.RRULE ? rruleParse(v.RRULE[0].wert) : null;
+    const serie = rr ? serieAbbilden(rr, dts.d)
+                     : { art:"keine", bis:null, starts:[dts.d], marken:[""], hinweise:[] };
+    if(v.EXDATE) serie.hinweise.push("einzelne gelöschte Termine der Serie gehen verloren");
+    serie.hinweise.forEach(h => hinweise.push({ titel, text:h }));
+
+    const dauer = ende - dts.d;
+    const uid = (v.UID ? icsText(v.UID[0].wert) : "") || ("ohne-uid-" + rows.length);
+
+    serie.starts.forEach((st, i) => {
+      // Letzter Termin der Serie — liegt der ganz vor dem Stichtag, überspringen.
+      const letzter = serie.bis ? endOfDay(parseYmd(serie.bis)) : null;
+      if(ab && serie.art === "keine" && st < ab){ uebersprungen.ausserhalb++; return; }
+      if(ab && serie.art !== "keine" && letzter && letzter < ab){ uebersprungen.ausserhalb++; return; }
+
+      rows.push({
+        household_id: state.membership.household_id,
+        titel: titel,
+        notiz: icsText(v.DESCRIPTION ? v.DESCRIPTION[0].wert : "").slice(0, 2000),
+        ort: icsText(v.LOCATION ? v.LOCATION[0].wert : ""),
+        ganztags: dts.ganztags,
+        start_at: st.toISOString(),
+        end_at: new Date(st.getTime() + dauer).toISOString(),
+        wiederholung: serie.art,
+        wiederholung_bis: serie.bis,
+        member_ids: mitglieder,
+        created_by: state.session.user.id,
+        extern_uid: uid + (serie.marken[i] || "")
+      });
+    });
+  });
+
+  return { rows, hinweise, uebersprungen, gefunden: im.roh.length };
+}
+
+/* =========================================================
+   8. Darstellung
    ========================================================= */
 function render(){
   const app = $("#app");
@@ -471,6 +756,7 @@ function render(){
     '</div></div>' +
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
+    (state.importer ? dialogImport() : "") +
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
 }
 function focusFirst(){
@@ -576,11 +862,15 @@ function monatsAnsicht(){
     const key = ymd(d);
     const zeigen = (state.expanded === key) ? occ : occ.slice(0, maxProTag);
     const rest = occ.length - zeigen.length;
+    const ft = feiertagAn(d);
     html += '<div class="day' +
         (d.getMonth() !== c.getMonth() ? " other" : "") +
         (sameDay(d, heute) ? " today" : "") +
-        ((d.getDay()===0 || d.getDay()===6) ? " weekend" : "") + '">' +
-      '<button class="daynum" data-act="tag-neu" data-d="' + key + '" title="Termin an diesem Tag anlegen">' + d.getDate() + '</button>' +
+        ((d.getDay()===0 || d.getDay()===6 || ft) ? " weekend" : "") + '">' +
+      '<div class="dayhead">' +
+        '<button class="daynum" data-act="tag-neu" data-d="' + key + '" title="Termin an diesem Tag anlegen">' + d.getDate() + '</button>' +
+        (ft ? '<span class="ft" title="' + esc(ft) + '">' + esc(ft) + '</span>' : "") +
+      '</div>' +
       '<div class="daylist">' + zeigen.map(pillHtml).join("") +
       (rest > 0 ? '<button class="more" data-act="mehr" data-d="' + key + '">+ ' + rest + ' weitere</button>' : "") +
       '</div></div>';
@@ -592,9 +882,10 @@ function wochenAnsicht(){
   const mo = mondayOf(state.cursor), heute = new Date();
   let html = '<div class="weekgrid">';
   for(let i=0;i<7;i++){
-    const d = addDays(mo,i), occ = occurrencesOn(d);
+    const d = addDays(mo,i), occ = occurrencesOn(d), ft = feiertagAn(d);
     html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + '">' +
       '<h3><span>' + WDS[i] + '</span><b>' + d.getDate() + '.</b></h3>' +
+      (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
       (occ.length ? occ.map(pillHtml).join("") : '<span class="hint">—</span>') +
       '<button class="more" data-act="tag-neu" data-d="' + ymd(d) + '">+ Termin</button>' +
     '</div>';
@@ -615,8 +906,9 @@ function agendaItem(o){
 }
 
 function tagesAnsicht(){
-  const occ = occurrencesOn(state.cursor);
+  const occ = occurrencesOn(state.cursor), ft = feiertagAn(state.cursor);
   return '<div class="agenda">' +
+    (ft ? '<p class="ft ft-gross">' + esc(ft) + '</p>' : "") +
     (occ.length ? occ.map(agendaItem).join("") : '<p class="empty">Keine Termine an diesem Tag.</p>') +
     '<button class="btn" data-act="tag-neu" data-d="' + ymd(state.cursor) + '" style="align-self:flex-start;margin-top:6px">+ Termin an diesem Tag</button>' +
   '</div>';
@@ -698,6 +990,10 @@ function dialogEinstellungen(){
       '<input id="st-hh" type="text" value="' + esc(state.household ? state.household.name : "") + '"></div>' +
     '<div class="field"><label>Familienmitglieder</label>' + (rows || '<p class="hint">Noch niemand angelegt.</p>') + '</div>' +
     '<div class="row"><button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button></div>' +
+    '<div class="field"><label>Aus einem anderen Kalender übernehmen</label>' +
+      '<button class="btn" type="button" data-act="import-oeffnen" style="align-self:flex-start">Kalender importieren …</button>' +
+      '<span class="hint">Liest eine .ics-Datei, etwa den Export aus Google Kalender.</span></div>' +
+    '<label class="check"><input type="checkbox" data-act="feiertage"' + (state.feiertage ? " checked" : "") + '> Österreichische Feiertage anzeigen</label>' +
     '<div class="field"><label>Haushalts-Code</label>' +
       '<div class="code">' + esc(state.membership ? state.membership.household_id : "") + '</div>' +
       '<span class="hint">Damit tritt ein weiteres Gerät oder Konto demselben Haushalt bei.</span></div>' +
@@ -711,8 +1007,98 @@ function dialogEinstellungen(){
   '</div></div>';
 }
 
+function dialogImport(){
+  const im = state.importer;
+
+  if(im.bericht){
+    const b = im.bericht;
+    const gruppiert = {};
+    b.hinweise.forEach(h => { (gruppiert[h.text] = gruppiert[h.text] || []).push(h.titel); });
+    return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+      '<h2>Import abgeschlossen</h2>' +
+      '<div class="bilanz">' +
+        '<div><b>' + b.neu + '</b><span>neu angelegt</span></div>' +
+        '<div><b>' + b.bekannt + '</b><span>schon vorhanden</span></div>' +
+        '<div><b>' + b.uebersprungen + '</b><span>übersprungen</span></div>' +
+      '</div>' +
+      (Object.keys(gruppiert).length
+        ? '<div class="field"><label>Dabei vereinfacht</label>' +
+            Object.keys(gruppiert).map(t =>
+              '<p class="small"><b>' + esc(t) + '</b><br><span class="hint">' +
+              esc(gruppiert[t].slice(0,6).join(", ")) +
+              (gruppiert[t].length > 6 ? " und " + (gruppiert[t].length-6) + " weitere" : "") +
+              '</span></p>').join("") +
+          '</div>'
+        : '<p class="hint">Nichts musste vereinfacht werden.</p>') +
+      '<div class="actions"><span class="spacer"></span>' +
+        '<button class="btn primary" type="button" data-act="import-schliessen">Fertig</button></div>' +
+    '</div></div>';
+  }
+
+  if(!im.roh.length){
+    return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+      '<h2>Kalender importieren</h2>' +
+      (im.fehler ? '<div class="err">' + esc(im.fehler) + '</div>' : "") +
+      '<p class="small">In Google Kalender: <b>Einstellungen → Import und Export → Exportieren</b>. ' +
+        'Das ergibt eine ZIP-Datei; entpacke sie und wähle hier die gewünschte <code>.ics</code>-Datei.</p>' +
+      '<div class="field"><label for="ics">Datei</label>' +
+        '<input id="ics" type="file" accept=".ics,text/calendar" data-act="ics-datei"></div>' +
+      '<p class="hint">Die Datei wird nur in diesem Browser gelesen. Sie wird nirgendwo hochgeladen.</p>' +
+      '<div class="actions"><span class="spacer"></span>' +
+        '<button class="btn" type="button" data-act="import-schliessen">Abbrechen</button></div>' +
+    '</div></div>';
+  }
+
+  const vor = importVorbereiten();
+  const ueb = vor.uebersprungen;
+  const buchstaben = Object.keys(im.zaehler).sort();
+
+  return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+    '<h2>Import vorbereiten</h2>' +
+    (im.fehler ? '<div class="err">' + esc(im.fehler) + '</div>' : "") +
+    '<p class="small muted">' + esc(im.dateiname) + ' · ' + vor.gefunden + ' Termine in der Datei</p>' +
+
+    '<div class="field"><label for="ab">Übernehmen ab</label>' +
+      '<input id="ab" type="date" value="' + esc(im.abDatum) + '" data-act="ab-datum">' +
+      '<span class="hint">Serien, die über dieses Datum hinausreichen, kommen vollständig mit.</span></div>' +
+
+    (buchstaben.length
+      ? '<div class="field"><label>Buchstabe am Titelanfang</label>' +
+          buchstaben.map(b =>
+            '<div class="praefix">' +
+              '<span class="pbuchstabe">' + esc(b) + '</span>' +
+              '<span class="pzahl">' + im.zaehler[b] + '×</span>' +
+              '<select data-act="praefix" data-b="' + esc(b) + '">' +
+                '<option value="lassen"' + (im.praefixe[b] === "lassen" ? " selected" : "") + '>unverändert lassen</option>' +
+                '<option value="entfernen"' + (im.praefixe[b] === "entfernen" ? " selected" : "") + '>nur Buchstaben entfernen</option>' +
+                state.members.map(m =>
+                  '<option value="' + m.id + '"' + (im.praefixe[b] === m.id ? " selected" : "") + '>→ ' + esc(m.name) + '</option>').join("") +
+              '</select>' +
+            '</div>').join("") +
+        '</div>'
+      : '<p class="hint">Kein Titel beginnt mit einem einzelnen Buchstaben.</p>') +
+
+    '<div class="field"><label>Vorschau</label>' +
+      '<div class="bilanz">' +
+        '<div><b>' + vor.rows.length + '</b><span>werden angelegt</span></div>' +
+        '<div><b>' + (ueb.ausserhalb + ueb.serienausnahme + ueb.abgesagt + ueb.ohneDatum) + '</b><span>übersprungen</span></div>' +
+        '<div><b>' + vor.hinweise.length + '</b><span>vereinfacht</span></div>' +
+      '</div>' +
+      (vor.rows.length ? '<p class="hint">Zum Beispiel: ' +
+        esc(vor.rows.slice(0,3).map(r => r.titel).join(" · ")) + '</p>' : "") +
+    '</div>' +
+
+    '<div class="actions">' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="import-schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="button" data-act="import-start"' + (state.busy || !vor.rows.length ? " disabled" : "") + '>' +
+        (state.busy ? "Läuft …" : vor.rows.length + " Termine übernehmen") + '</button>' +
+    '</div>' +
+  '</div></div>';
+}
+
 /* =========================================================
-   7. Dialog-Zustand aus Formularfeldern einsammeln
+   9. Dialog-Zustand aus Formularfeldern einsammeln
    ========================================================= */
 function dialogLesen(){
   const d = state.dialog; if(!d) return;
@@ -745,7 +1131,7 @@ function neuerDialog(datum, ev){
 }
 
 /* =========================================================
-   8. Zurück-Taste: schließt den Dialog statt die Seite zu verlassen
+   10. Zurück-Taste: schließt den Dialog statt die Seite zu verlassen
    ========================================================= */
 let dialogInChronik = false;
 
@@ -761,21 +1147,21 @@ function overlayChronikLoesen(){
   if(dialogInChronik){ dialogInChronik = false; history.back(); }
 }
 function overlaySchliessen(){
-  state.dialog = null; state.settings = false;
+  state.dialog = null; state.settings = false; state.importer = null;
   overlayChronikLoesen();
   render();
 }
 
 window.addEventListener("popstate", function(){
   dialogInChronik = false;
-  if(state.dialog || state.settings){
-    state.dialog = null; state.settings = false;
+  if(state.dialog || state.settings || state.importer){
+    state.dialog = null; state.settings = false; state.importer = null;
     render();
   }
 });
 
 /* =========================================================
-   9. Aktionen
+   11. Aktionen
    ========================================================= */
 document.addEventListener("click", async function(e){
   const el = e.target.closest("[data-act]");
@@ -824,6 +1210,24 @@ document.addEventListener("click", async function(e){
       if(i >= 0) ids.splice(i,1); else ids.push(id);
       return render();
     }
+    case "import-oeffnen": {
+      state.settings = false;
+      const jahr = new Date().getFullYear();
+      state.importer = {
+        dateiname:"", roh:[], zaehler:{}, praefixe:{},
+        abDatum: jahr + "-01-01", bericht:null, fehler:null
+      };
+      overlayOeffnen();
+      return render();
+    }
+    case "import-schliessen":
+      state.importer = null; overlayChronikLoesen(); return render();
+    case "import-start":
+      return importAusfuehren();
+    case "feiertage":
+      state.feiertage = el.checked;
+      localStorage.setItem("fp.feiertage", state.feiertage ? "1" : "0");
+      return render();
     case "loeschen":   return terminLoeschen();
     case "member-neu": return mitgliedAnlegen();
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
@@ -848,8 +1252,46 @@ document.addEventListener("submit", async function(e){
   if(act === "haushalt-beitreten")return haushaltBeitreten();
 });
 
+document.addEventListener("change", async function(e){
+  const el = e.target.closest("[data-act]");
+  if(!el || !state.importer) return;
+
+  if(el.dataset.act === "ab-datum"){
+    state.importer.abDatum = el.value;
+    return render();
+  }
+  if(el.dataset.act === "praefix"){
+    state.importer.praefixe[el.dataset.b] = el.value;
+    return render();
+  }
+  if(el.dataset.act === "ics-datei"){
+    const datei = el.files && el.files[0];
+    if(!datei) return;
+    try{
+      const text = await datei.text();
+      const roh = icsParse(text);
+      if(!roh.length) throw new Error("In dieser Datei stehen keine Termine. Ist es der Kalender-Export?");
+      const zaehler = praefixeErkennen(roh);
+      const praefixe = {};
+      // Buchstabe, der zum Kürzel einer Person passt, wird gleich vorgeschlagen.
+      Object.keys(zaehler).forEach(b => {
+        const treffer = state.members.find(m => (m.kuerzel || m.name).charAt(0).toUpperCase() === b);
+        praefixe[b] = treffer ? treffer.id : "lassen";
+      });
+      state.importer.dateiname = datei.name;
+      state.importer.roh = roh;
+      state.importer.zaehler = zaehler;
+      state.importer.praefixe = praefixe;
+      state.importer.fehler = null;
+    }catch(err){
+      state.importer.fehler = "Datei konnte nicht gelesen werden: " + (err.message || err);
+    }
+    return render();
+  }
+});
+
 document.addEventListener("keydown", function(e){
-  if(e.key === "Escape" && (state.dialog || state.settings)){ overlaySchliessen(); }
+  if(e.key === "Escape" && (state.dialog || state.settings || state.importer)){ overlaySchliessen(); }
 });
 
 async function anmelden(){
@@ -1011,6 +1453,41 @@ async function einstellungenSpeichern(){
   state.busy = false; render();
 }
 
+async function importAusfuehren(){
+  const vor = importVorbereiten();
+  if(!vor.rows.length) return;
+
+  state.busy = true; render();
+  let neu = 0, fehler = null;
+  try{
+    for(let i = 0; i < vor.rows.length; i += 200){
+      const teil = vor.rows.slice(i, i + 200);
+      const r = await sb.from("events")
+        .upsert(teil, { onConflict: "household_id,extern_uid", ignoreDuplicates: true })
+        .select("id");
+      if(r.error) throw r.error;
+      neu += (r.data || []).length;
+    }
+    await neuLaden();
+  }catch(err){
+    fehler = err.message || String(err);
+  }
+  state.busy = false;
+
+  if(fehler){
+    state.importer.fehler = fehler;
+  }else{
+    const u = vor.uebersprungen;
+    state.importer.bericht = {
+      neu: neu,
+      bekannt: vor.rows.length - neu,
+      uebersprungen: u.ausserhalb + u.serienausnahme + u.abgesagt + u.ohneDatum,
+      hinweise: vor.hinweise
+    };
+  }
+  render();
+}
+
 async function neuLaden(){
   const hid = state.membership.household_id;
   const [hh, mem, ev] = await Promise.all([
@@ -1024,7 +1501,7 @@ async function neuLaden(){
 }
 
 /* =========================================================
-   10. Start
+   12. Start
    ========================================================= */
 async function start(){
   if(!sb){ render(); return; }
