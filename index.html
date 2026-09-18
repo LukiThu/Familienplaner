@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2F6B4F">
+<title>Familienplaner</title>
+<style>
+:root{
+  --bg:#F1F4F0; --surface:#FFFFFF; --surface-2:#E8EDE7; --surface-3:#F7F9F6;
+  --text:#17201C; --muted:#66716A; --line:#D9E0D9; --line-strong:#BCC7BC;
+  --accent:#2F6B4F; --accent-soft:#E2EDE5; --accent-text:#FFFFFF;
+  --danger:#A9522A; --today:#FBF3E4; --other-month:#9AA69C;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(23,32,28,.07), 0 10px 30px -20px rgba(23,32,28,.45);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#12160F; --surface:#1A1F1A; --surface-2:#232A23; --surface-3:#171C17;
+    --text:#E5EBE3; --muted:#98A399; --line:#2B322C; --line-strong:#3D453D;
+    --accent:#78C398; --accent-soft:#1E2B23; --accent-text:#10170F;
+    --danger:#D9895C; --today:#2A2717; --other-month:#5D665E;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -20px rgba(0,0,0,.9);
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:16px; line-height:1.45; -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ---------- Grundbausteine ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  min-height:42px;padding:0 15px;border-radius:8px;
+  border:1px solid var(--line-strong);background:var(--surface);
+  font-size:15px;font-weight:500;white-space:nowrap;
+}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--surface-2)}
+.btn.danger{color:var(--danger);border-color:transparent;background:transparent}
+.btn.danger:hover{background:var(--surface-2)}
+.btn.icon{min-width:42px;padding:0 10px;font-size:18px;line-height:1}
+.btn[disabled]{opacity:.5;cursor:default}
+
+.field{display:flex;flex-direction:column;gap:6px}
+.field > label{font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
+  width:100%;min-height:42px;padding:9px 11px;border-radius:8px;
+  border:1px solid var(--line-strong);background:var(--surface);
+}
+textarea{min-height:70px;resize:vertical}
+input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row > *{flex:1 1 0;min-width:0}
+.hint{font-size:13.5px;color:var(--muted);line-height:1.5}
+.err{font-size:14px;color:var(--danger);background:var(--surface-2);padding:10px 12px;border-radius:8px}
+
+/* ---------- Zentrierte Karten (Login, Einrichtung) ---------- */
+.center{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{
+  width:100%;max-width:420px;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:26px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:16px;
+}
+.card h1{margin:0;font-size:24px;letter-spacing:-.02em}
+.card h2{margin:0;font-size:17px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.01em}
+.brand .mark{width:11px;height:11px;border-radius:3px;background:var(--accent);flex:none}
+
+/* ---------- Rahmen ---------- */
+.shell{height:100%;display:flex;flex-direction:column}
+.topbar{
+  flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);
+}
+.topbar .spacer{flex:1 1 auto}
+.viewtabs{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px}
+.viewtabs button{
+  min-height:34px;padding:0 13px;border:none;border-radius:7px;background:transparent;
+  font-size:14.5px;font-weight:500;color:var(--muted);
+}
+.viewtabs button[aria-pressed="true"]{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.datenav{display:flex;align-items:center;gap:6px}
+.datelabel{font-size:17px;font-weight:600;letter-spacing:-.01em;min-width:9ch;text-align:center}
+.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fchip{
+  display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;
+  border-radius:999px;border:1px solid var(--line-strong);background:var(--surface);
+  font-size:13.5px;font-weight:600;
+}
+.fchip .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
+.fchip[aria-pressed="false"]{opacity:.4}
+
+.main{flex:1 1 auto;min-height:0;display:flex}
+.content{flex:1 1 auto;min-width:0;overflow:auto;padding:14px}
+.rail{
+  flex:none;width:290px;border-left:1px solid var(--line);background:var(--surface);
+  overflow:auto;padding:16px;display:flex;flex-direction:column;gap:20px;
+}
+@media (max-width:1023px){ .rail{display:none} }
+
+/* ---------- Monatsraster ---------- */
+.monthgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.wdhead{background:var(--surface);padding:7px 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:center}
+.day{
+  background:var(--surface);min-height:104px;padding:5px 5px 7px;
+  display:flex;flex-direction:column;gap:3px;text-align:left;border:none;width:100%;
+}
+.day:hover{background:var(--surface-3)}
+.day.other .daynum{color:var(--other-month)}
+.day.today{background:var(--today)}
+.day.weekend{background:var(--surface-3)}
+.day.weekend.today{background:var(--today)}
+.daynum{
+  font-size:13px;font-weight:600;color:var(--muted);
+  padding:1px 5px;border:none;background:none;border-radius:5px;
+  align-self:flex-start;min-width:24px;text-align:left;font-variant-numeric:tabular-nums;
+}
+.daynum:hover{background:var(--surface-2);color:var(--text)}
+.day.today .daynum{color:var(--accent);font-weight:700}
+.daylist{display:flex;flex-direction:column;gap:2px;min-width:0}
+
+.pill{
+  display:flex;align-items:center;gap:5px;width:100%;text-align:left;
+  border:none;background:var(--surface-2);border-radius:5px;
+  padding:3px 6px;font-size:12.5px;line-height:1.3;min-width:0;
+  border-left:3px solid var(--c,var(--line-strong));
+}
+.pill:hover{filter:brightness(.96)}
+.pill .t{font-variant-numeric:tabular-nums;color:var(--muted);flex:none;font-size:11.5px}
+.pill .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.pill .who{flex:none;font-size:11px;font-weight:700;color:var(--c,var(--muted));letter-spacing:.02em}
+.more{font-size:11.5px;color:var(--muted);padding:1px 6px;text-align:left;background:none;border:none}
+
+/* ---------- Wochen- und Tagesansicht ---------- */
+.weekgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+@media (max-width:900px){ .weekgrid{grid-template-columns:1fr} }
+.daycol{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px;display:flex;flex-direction:column;gap:7px;min-height:130px}
+.daycol.today{border-color:var(--accent)}
+.daycol > h3{margin:0;font-size:13px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.daycol.today > h3{color:var(--accent)}
+.daycol > h3 b{font-size:17px;color:var(--text)}
+.daycol.today > h3 b{color:var(--accent)}
+
+.agenda{display:flex;flex-direction:column;gap:8px;max-width:620px}
+.aitem{
+  display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px;align-items:start;
+  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--c,var(--line-strong));
+  border-radius:var(--radius);padding:12px 14px;text-align:left;width:100%;
+}
+.aitem:hover{background:var(--surface-3)}
+.aitem .when{font-size:13.5px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;padding-top:1px}
+.aitem .body{display:flex;flex-direction:column;gap:3px;min-width:0}
+.aitem .title{font-size:16px;font-weight:600;letter-spacing:-.01em}
+.aitem .meta{font-size:13.5px;color:var(--muted)}
+.who-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+.who-chip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.who-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+
+.empty{color:var(--muted);font-size:14.5px;padding:14px 2px}
+.railsec{display:flex;flex-direction:column;gap:9px}
+.railsec > h2{margin:0;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.railitem{display:flex;gap:9px;align-items:baseline;font-size:14.5px;border-left:3px solid var(--c,var(--line-strong));padding:2px 0 2px 9px;background:none;border-top:none;border-right:none;border-bottom:none;text-align:left;width:100%}
+.railitem:hover{background:var(--surface-2)}
+.railitem .t{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;min-width:4.5ch}
+.railitem .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- Dialog ---------- */
+.backdrop{position:fixed;inset:0;background:rgba(10,16,12,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:50}
+.modal{
+  width:100%;max-width:520px;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;box-shadow:var(--shadow);padding:22px;margin:auto 0;
+  display:flex;flex-direction:column;gap:16px;
+}
+.modal h2{margin:0;font-size:19px;letter-spacing:-.015em}
+.modal .actions{display:flex;gap:10px;align-items:center;padding-top:2px}
+.modal .actions .spacer{flex:1 1 auto}
+.whopick{display:flex;gap:7px;flex-wrap:wrap}
+.whopick button{
+  display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 12px;border-radius:999px;
+  border:1px solid var(--line-strong);background:var(--surface);font-size:14px;font-weight:600;
+}
+.whopick button[aria-pressed="true"]{background:var(--c);border-color:var(--c);color:#fff}
+.whopick .dot{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.whopick button[aria-pressed="true"] .dot{background:#fff}
+.check{display:flex;align-items:center;gap:9px;font-size:15px;min-height:42px}
+.check input{width:19px;height:19px;accent-color:var(--accent)}
+
+.memberrow{display:flex;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.memberrow:last-of-type{border-bottom:none}
+.memberrow .nm{flex:2 1 120px;min-width:0}
+.memberrow .kz{flex:0 0 68px}
+.memberrow .kid{flex:none;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all;background:var(--surface-2);padding:9px 11px;border-radius:8px}
+
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:11px 17px;border-radius:9px;font-size:14.5px;z-index:60;box-shadow:var(--shadow)}
+
+/* ---------- Handy ---------- */
+@media (max-width:640px){
+  .topbar{padding:9px 11px;gap:8px 7px}
+  .topbar .viewtabs{order:1}
+  .topbar .spacer{order:2}
+  .topbar [data-act="neu"]{order:3}
+  .topbar [data-act="einstellungen"]{order:4}
+  .topbar [data-act="neu"] .lbl{display:none}
+  .topbar .datenav{order:5;width:100%;justify-content:space-between}
+  .topbar .filters{order:6;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .topbar .filters::-webkit-scrollbar{display:none}
+  .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .content{padding:10px}
+  .day{min-height:66px;padding:3px 3px 5px;gap:2px}
+  .daynum{font-size:12px}
+  .pill{padding:2px 4px;font-size:11.5px;gap:3px}
+  .pill .t{display:none}
+  .aitem{grid-template-columns:64px minmax(0,1fr);gap:9px;padding:11px}
+  .datelabel{font-size:16px;min-width:7ch}
+  .modal{padding:18px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* =========================================================
+   1. Zugangsdaten — hier eintragen
+   Zu finden im Supabase-Projekt unter Settings → API
+   ========================================================= */
+const SUPABASE_URL      = "https://dlafxjemkdzxjrtprncz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
+
+/* =========================================================
+   2. Konstanten und kleine Helfer
+   ========================================================= */
+const FARBEN = ["#C2701C","#276E7D","#A8385E","#57489B","#2F6B4F","#8A6D1F","#B23A48","#3A6EA5"];
+const WDS    = ["Mo","Di","Mi","Do","Fr","Sa","So"];
+const WDLANG = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"];
+const MONATE = ["Jänner","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const WDH    = [
+  ["keine","einmalig"],
+  ["taeglich","täglich"],
+  ["woechentlich","wöchentlich"],
+  ["zweiwoechentlich","alle zwei Wochen"],
+  ["monatlich","monatlich"],
+  ["jaehrlich","jährlich"]
+];
+
+const $ = (s,r)=> (r||document).querySelector(s);
+const esc = s => String(s==null?"":s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const endOfDay   = d => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+const addDays    = (d,n)=> new Date(d.getFullYear(), d.getMonth(), d.getDate()+n, d.getHours(), d.getMinutes());
+function addMonths(d,n){
+  const day = d.getDate();
+  const t = new Date(d.getFullYear(), d.getMonth()+n, 1, d.getHours(), d.getMinutes());
+  const last = new Date(t.getFullYear(), t.getMonth()+1, 0).getDate();
+  t.setDate(Math.min(day,last));
+  return t;
+}
+const addYears = (d,n)=> addMonths(d, n*12);
+const mondayOf = d => addDays(startOfDay(d), -((d.getDay()+6)%7));
+const sameDay  = (a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+const pad = n => String(n).padStart(2,"0");
+const ymd = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const hm  = d => pad(d.getHours())+":"+pad(d.getMinutes());
+function parseYmd(s){ const p=String(s).split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
+function fromInputs(dateStr, timeStr){
+  const p = dateStr.split("-"), t = (timeStr||"00:00").split(":");
+  return new Date(+p[0], +p[1]-1, +p[2], +t[0], +t[1]);
+}
+
+/* =========================================================
+   3. Zustand
+   ========================================================= */
+const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
+         : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const state = {
+  ready:false, session:null, membership:null, household:null,
+  members:[], events:[],
+  view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
+  cursor: new Date(),
+  hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
+  dialog:null, settings:false, expanded:null,
+  authError:null, busy:false, toast:null
+};
+let channel = null, toastTimer = null;
+
+function setToast(msg){
+  state.toast = msg; render();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ state.toast=null; render(); }, 2600);
+}
+function memberById(id){ return state.members.find(m=>m.id===id) || null; }
+
+/* =========================================================
+   4. Daten laden
+   ========================================================= */
+async function loadAll(){
+  const uid = state.session.user.id;
+  const ms = await sb.from("memberships").select("*").eq("user_id", uid).maybeSingle();
+  if(ms.error) throw ms.error;
+  state.membership = ms.data;
+  if(!state.membership){ state.household=null; state.members=[]; state.events=[]; return; }
+
+  const [hh, mem, ev] = await Promise.all([
+    sb.from("households").select("*").eq("id", state.membership.household_id).maybeSingle(),
+    sb.from("members").select("*").eq("household_id", state.membership.household_id).order("sortierung").order("name"),
+    sb.from("events").select("*").eq("household_id", state.membership.household_id).order("start_at")
+  ]);
+  if(hh.error) throw hh.error;
+  if(mem.error) throw mem.error;
+  if(ev.error) throw ev.error;
+  state.household = hh.data;
+  state.members = mem.data || [];
+  state.events  = ev.data || [];
+  subscribe();
+}
+
+function subscribe(){
+  if(channel || !state.membership) return;
+  channel = sb.channel("fp-" + state.membership.household_id)
+    .on("postgres_changes", { event:"*", schema:"public", table:"events" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"members" }, refreshQuiet)
+    .subscribe();
+}
+let refreshTimer = null;
+function refreshQuiet(){
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async ()=>{
+    try{
+      const hid = state.membership.household_id;
+      const [mem, ev] = await Promise.all([
+        sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
+        sb.from("events").select("*").eq("household_id", hid).order("start_at")
+      ]);
+      if(!mem.error) state.members = mem.data || [];
+      if(!ev.error)  state.events  = ev.data || [];
+      render();
+    }catch(e){ /* stiller Abgleich — Fehler beim nächsten Versuch */ }
+  }, 250);
+}
+
+/* =========================================================
+   5. Termine: Serien auflösen
+   ========================================================= */
+function occurrences(ev, from, to){
+  const out = [];
+  const s0 = new Date(ev.start_at), e0 = new Date(ev.end_at);
+  const dur = Math.max(0, e0 - s0);
+  if(ev.wiederholung === "keine"){
+    if(e0 >= from && s0 <= to) out.push({ ev, s:s0, e:e0 });
+    return out;
+  }
+  const bis = ev.wiederholung_bis ? endOfDay(parseYmd(ev.wiederholung_bis)) : null;
+  let cur = new Date(s0);
+  for(let i=0; i<800; i++){
+    if(bis && cur > bis) break;
+    if(cur > to) break;
+    const e = new Date(cur.getTime() + dur);
+    if(e >= from) out.push({ ev, s:new Date(cur), e });
+    if(ev.wiederholung === "taeglich")              cur = addDays(cur,1);
+    else if(ev.wiederholung === "woechentlich")     cur = addDays(cur,7);
+    else if(ev.wiederholung === "zweiwoechentlich") cur = addDays(cur,14);
+    else if(ev.wiederholung === "monatlich")        cur = addMonths(cur,1);
+    else if(ev.wiederholung === "jaehrlich")        cur = addYears(cur,1);
+    else break;
+  }
+  return out;
+}
+
+function visible(ev){
+  if(state.hidden.size === 0) return true;
+  const ids = ev.member_ids || [];
+  if(ids.length === 0) return true;                 // Termine ohne Zuordnung immer zeigen
+  return ids.some(id => !state.hidden.has(id));
+}
+
+function occurrencesInRange(from, to){
+  const out = [];
+  state.events.forEach(ev=>{ if(visible(ev)) out.push.apply(out, occurrences(ev, from, to)); });
+  out.sort((a,b)=>{
+    if(a.ev.ganztags !== b.ev.ganztags) return a.ev.ganztags ? -1 : 1;
+    return a.s - b.s || String(a.ev.titel).localeCompare(String(b.ev.titel), "de");
+  });
+  return out;
+}
+function occurrencesOn(day){
+  return occurrencesInRange(startOfDay(day), endOfDay(day));
+}
+
+function colorOf(ev){
+  const ids = (ev.member_ids || []).filter(id => memberById(id));
+  if(ids.length === 1) return memberById(ids[0]).farbe;
+  if(ids.length > 1)   return "var(--accent)";
+  return "var(--line-strong)";
+}
+function kuerzelOf(ev){
+  const ms = (ev.member_ids || []).map(memberById).filter(Boolean);
+  if(ms.length === 0 || ms.length === state.members.length) return "";
+  return ms.map(m => m.kuerzel || m.name.slice(0,2)).join("·");
+}
+function zeitText(o){
+  if(o.ev.ganztags){
+    const tage = Math.round((startOfDay(o.e) - startOfDay(o.s)) / 86400000) + 1;
+    return tage > 1 ? "ganztägig, " + tage + " Tage" : "ganztägig";
+  }
+  return hm(o.s) + (sameDay(o.s,o.e) && hm(o.e) !== hm(o.s) ? "–" + hm(o.e) : "");
+}
+
+/* =========================================================
+   6. Darstellung
+   ========================================================= */
+function render(){
+  const app = $("#app");
+  if(!sb){ app.innerHTML = viewConfigFehlt(); return; }
+  if(!state.ready){ app.innerHTML = '<div class="center"><p class="hint">Wird geladen …</p></div>'; return; }
+  if(!state.session){ app.innerHTML = viewLogin(); focusFirst(); return; }
+  if(!state.membership){ app.innerHTML = viewSetup(); focusFirst(); return; }
+
+  app.innerHTML =
+    '<div class="shell">' + topbar() + '<div class="main">' +
+      '<div class="content">' + (state.view==="monat" ? monatsAnsicht() : state.view==="woche" ? wochenAnsicht() : tagesAnsicht()) + '</div>' +
+      (state.view==="monat" ? rail() : "") +
+    '</div></div>' +
+    (state.dialog ? dialogTermin() : "") +
+    (state.settings ? dialogEinstellungen() : "") +
+    (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
+}
+function focusFirst(){
+  const el = $("#app input, #app button.primary");
+  if(el) setTimeout(()=>el.focus(), 30);
+}
+
+function viewConfigFehlt(){
+  return '<div class="center"><div class="card">' +
+    '<div class="brand"><span class="mark"></span>Familienplaner</div>' +
+    '<h1>Noch nicht verbunden</h1>' +
+    '<p class="hint">In dieser Datei fehlen die Zugangsdaten zu Supabase. Ganz oben im Script-Block stehen zwei Zeilen — dort die Projekt-URL und den Anon-Key aus <b>Settings → API</b> eintragen.</p>' +
+    '<div class="code">const SUPABASE_URL = "…";<br>const SUPABASE_ANON_KEY = "…";</div>' +
+  '</div></div>';
+}
+
+function viewLogin(){
+  return '<div class="center"><form class="card" data-act="login">' +
+    '<div class="brand"><span class="mark"></span>Familienplaner</div>' +
+    '<h1>Anmelden</h1>' +
+    (state.authError ? '<div class="err">' + esc(state.authError) + '</div>' : "") +
+    '<div class="field"><label for="lg-mail">E-Mail</label><input id="lg-mail" type="email" autocomplete="username" required></div>' +
+    '<div class="field"><label for="lg-pw">Passwort</label><input id="lg-pw" type="password" autocomplete="current-password" required></div>' +
+    '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>' + (state.busy ? "Moment …" : "Anmelden") + '</button>' +
+    '<p class="hint">Konten werden im Supabase-Projekt angelegt, nicht hier.</p>' +
+  '</form></div>';
+}
+
+function viewSetup(){
+  return '<div class="center"><div class="card">' +
+    '<div class="brand"><span class="mark"></span>Familienplaner</div>' +
+    '<h1>Einrichten</h1>' +
+    '<p class="hint">Dieses Konto gehört noch zu keinem Haushalt.</p>' +
+    (state.authError ? '<div class="err">' + esc(state.authError) + '</div>' : "") +
+    '<form data-act="haushalt-neu" style="display:flex;flex-direction:column;gap:12px">' +
+      '<h2>Haushalt anlegen</h2>' +
+      '<div class="field"><label for="hh-name">Name</label><input id="hh-name" type="text" value="Familie" required></div>' +
+      '<div class="field"><label for="hh-mitglieder">Familienmitglieder, eines pro Zeile</label>' +
+        '<textarea id="hh-mitglieder" rows="4" placeholder="Anna&#10;Ben&#10;Clara&#10;David"></textarea></div>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Haushalt anlegen</button>' +
+    '</form>' +
+    '<form data-act="haushalt-beitreten" style="display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:16px">' +
+      '<h2>Oder beitreten</h2>' +
+      '<div class="field"><label for="hh-code">Haushalts-Code</label><input id="hh-code" type="text" placeholder="aus den Einstellungen des ersten Geräts"></div>' +
+      '<button class="btn" type="submit"' + (state.busy ? " disabled" : "") + '>Beitreten</button>' +
+    '</form>' +
+    '<button class="btn ghost" data-act="logout" type="button">Abmelden</button>' +
+  '</div></div>';
+}
+
+function topbar(){
+  const c = state.cursor;
+  let label;
+  if(state.view === "monat")      label = MONATE[c.getMonth()] + " " + c.getFullYear();
+  else if(state.view === "woche"){
+    const mo = mondayOf(c), so = addDays(mo,6);
+    label = mo.getDate() + ". " + MONATE[mo.getMonth()].slice(0,3) + " – " + so.getDate() + ". " + MONATE[so.getMonth()].slice(0,3);
+  }
+  else label = WDLANG[(c.getDay()+6)%7] + ", " + c.getDate() + ". " + MONATE[c.getMonth()];
+
+  const chips = state.members.map(m =>
+    '<button class="fchip" data-act="filter" data-id="' + m.id + '" aria-pressed="' + (!state.hidden.has(m.id)) + '" style="--c:' + esc(m.farbe) + '">' +
+      '<span class="dot"></span>' + esc(m.kuerzel || m.name) + '</button>').join("");
+
+  return '<div class="topbar">' +
+    '<div class="viewtabs">' +
+      '<button data-act="view" data-v="monat" aria-pressed="' + (state.view==="monat") + '">Monat</button>' +
+      '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
+      '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
+    '</div>' +
+    '<div class="datenav">' +
+      '<button class="btn icon ghost" data-act="prev" aria-label="zurück">‹</button>' +
+      '<span class="datelabel">' + esc(label) + '</span>' +
+      '<button class="btn icon ghost" data-act="next" aria-label="weiter">›</button>' +
+      '<button class="btn ghost" data-act="heute">Heute</button>' +
+    '</div>' +
+    '<div class="spacer"></div>' +
+    '<div class="filters">' + chips + '</div>' +
+    '<button class="btn primary" data-act="neu" aria-label="Termin anlegen">+<span class="lbl">&nbsp;Termin</span></button>' +
+    '<button class="btn icon ghost" data-act="einstellungen" aria-label="Einstellungen">⚙</button>' +
+  '</div>';
+}
+
+function pillHtml(o){
+  const k = kuerzelOf(o.ev);
+  return '<button class="pill" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+    (o.ev.ganztags ? "" : '<span class="t">' + hm(o.s) + '</span>') +
+    (k ? '<span class="who">' + esc(k) + '</span>' : "") +
+    '<span class="n">' + esc(o.ev.titel) + '</span></button>';
+}
+
+function monatsAnsicht(){
+  const c = state.cursor;
+  const first = new Date(c.getFullYear(), c.getMonth(), 1);
+  const start = mondayOf(first);
+  const heute = new Date();
+  const maxProTag = window.innerWidth < 641 ? 2 : 3;
+
+  let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
+  for(let i=0; i<42; i++){
+    const d = addDays(start, i);
+    const occ = occurrencesOn(d);
+    const key = ymd(d);
+    const zeigen = (state.expanded === key) ? occ : occ.slice(0, maxProTag);
+    const rest = occ.length - zeigen.length;
+    html += '<div class="day' +
+        (d.getMonth() !== c.getMonth() ? " other" : "") +
+        (sameDay(d, heute) ? " today" : "") +
+        ((d.getDay()===0 || d.getDay()===6) ? " weekend" : "") + '">' +
+      '<button class="daynum" data-act="tag-neu" data-d="' + key + '" title="Termin an diesem Tag anlegen">' + d.getDate() + '</button>' +
+      '<div class="daylist">' + zeigen.map(pillHtml).join("") +
+      (rest > 0 ? '<button class="more" data-act="mehr" data-d="' + key + '">+ ' + rest + ' weitere</button>' : "") +
+      '</div></div>';
+  }
+  return html + '</div>';
+}
+
+function wochenAnsicht(){
+  const mo = mondayOf(state.cursor), heute = new Date();
+  let html = '<div class="weekgrid">';
+  for(let i=0;i<7;i++){
+    const d = addDays(mo,i), occ = occurrencesOn(d);
+    html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + '">' +
+      '<h3><span>' + WDS[i] + '</span><b>' + d.getDate() + '.</b></h3>' +
+      (occ.length ? occ.map(pillHtml).join("") : '<span class="hint">—</span>') +
+      '<button class="more" data-act="tag-neu" data-d="' + ymd(d) + '">+ Termin</button>' +
+    '</div>';
+  }
+  return html + '</div>';
+}
+
+function agendaItem(o){
+  const ms = (o.ev.member_ids || []).map(memberById).filter(Boolean);
+  return '<button class="aitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+    '<span class="when">' + esc(zeitText(o)) + '</span>' +
+    '<span class="body">' +
+      '<span class="title">' + esc(o.ev.titel) + '</span>' +
+      (o.ev.ort ? '<span class="meta">' + esc(o.ev.ort) + '</span>' : "") +
+      (ms.length ? '<span class="who-chips">' + ms.map(m =>
+        '<span class="who-chip" style="--c:' + esc(m.farbe) + '"><span class="dot"></span>' + esc(m.name) + '</span>').join("") + '</span>' : "") +
+    '</span></button>';
+}
+
+function tagesAnsicht(){
+  const occ = occurrencesOn(state.cursor);
+  return '<div class="agenda">' +
+    (occ.length ? occ.map(agendaItem).join("") : '<p class="empty">Keine Termine an diesem Tag.</p>') +
+    '<button class="btn" data-act="tag-neu" data-d="' + ymd(state.cursor) + '" style="align-self:flex-start;margin-top:6px">+ Termin an diesem Tag</button>' +
+  '</div>';
+}
+
+function rail(){
+  const heute = new Date(), morgen = addDays(heute,1);
+  const blk = (titel, tag) => {
+    const occ = occurrencesOn(tag);
+    return '<div class="railsec"><h2>' + titel + '</h2>' +
+      (occ.length ? occ.map(o =>
+        '<button class="railitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="--c:' + colorOf(o.ev) + '">' +
+          '<span class="t">' + (o.ev.ganztags ? "ganzt." : hm(o.s)) + '</span>' +
+          '<span class="n">' + esc(o.ev.titel) + '</span></button>').join("")
+        : '<span class="hint">Nichts eingetragen.</span>') +
+    '</div>';
+  };
+  return '<aside class="rail">' +
+    blk("Heute · " + heute.getDate() + ". " + MONATE[heute.getMonth()], heute) +
+    blk("Morgen · " + morgen.getDate() + ". " + MONATE[morgen.getMonth()], morgen) +
+  '</aside>';
+}
+
+/* ---------- Termin-Dialog ---------- */
+function dialogTermin(){
+  const d = state.dialog;
+  const whos = state.members.map(m =>
+    '<button type="button" data-act="who" data-id="' + m.id + '" aria-pressed="' + (d.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+      '<span class="dot"></span>' + esc(m.name) + '</button>').join("");
+
+  return '<div class="backdrop" data-act="backdrop"><form class="modal" data-act="speichern">' +
+    '<h2>' + (d.id ? "Termin bearbeiten" : "Neuer Termin") + '</h2>' +
+    (d.error ? '<div class="err">' + esc(d.error) + '</div>' : "") +
+    '<div class="field"><label for="ev-titel">Titel</label><input id="ev-titel" type="text" value="' + esc(d.titel) + '" required></div>' +
+    '<div class="field"><label>Für wen</label><div class="whopick">' + (whos || '<span class="hint">Noch keine Familienmitglieder angelegt.</span>') + '</div>' +
+      '<span class="hint">Nichts ausgewählt heißt: betrifft alle.</span></div>' +
+    '<label class="check"><input type="checkbox" data-act="ganztags"' + (d.ganztags ? " checked" : "") + '> Ganztägig</label>' +
+    '<div class="row">' +
+      '<div class="field"><label for="ev-vd">Von</label><input id="ev-vd" type="date" value="' + d.vd + '" required></div>' +
+      (d.ganztags ? "" : '<div class="field"><label for="ev-vt">Uhrzeit</label><input id="ev-vt" type="time" value="' + d.vt + '"></div>') +
+    '</div>' +
+    '<div class="row">' +
+      '<div class="field"><label for="ev-bd">Bis</label><input id="ev-bd" type="date" value="' + d.bd + '" required></div>' +
+      (d.ganztags ? "" : '<div class="field"><label for="ev-bt">Uhrzeit</label><input id="ev-bt" type="time" value="' + d.bt + '"></div>') +
+    '</div>' +
+    '<div class="row">' +
+      '<div class="field"><label for="ev-wdh">Wiederholung</label><select id="ev-wdh" data-act="wdh">' +
+        WDH.map(w => '<option value="' + w[0] + '"' + (d.wiederholung===w[0] ? " selected" : "") + '>' + w[1] + '</option>').join("") +
+      '</select></div>' +
+      (d.wiederholung === "keine" ? "" :
+        '<div class="field"><label for="ev-bis">Endet am (leer = ohne Ende)</label><input id="ev-bis" type="date" value="' + (d.wiederholung_bis || "") + '"></div>') +
+    '</div>' +
+    (d.id && d.wiederholung !== "keine" ? '<p class="hint">Änderungen gelten für die ganze Serie.</p>' : "") +
+    '<div class="field"><label for="ev-ort">Ort</label><input id="ev-ort" type="text" value="' + esc(d.ort) + '"></div>' +
+    '<div class="field"><label for="ev-notiz">Notiz</label><textarea id="ev-notiz">' + esc(d.notiz) + '</textarea></div>' +
+    '<div class="actions">' +
+      (d.id ? '<button class="btn danger" type="button" data-act="loeschen">Löschen</button>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
+/* ---------- Einstellungen ---------- */
+function dialogEinstellungen(){
+  const rows = state.members.map(m =>
+    '<div class="memberrow" data-mid="' + m.id + '">' +
+      '<input class="nm" type="text" value="' + esc(m.name) + '" data-f="name" aria-label="Name">' +
+      '<input class="kz" type="text" value="' + esc(m.kuerzel) + '" data-f="kuerzel" maxlength="4" aria-label="Kürzel">' +
+      '<input type="color" value="' + esc(m.farbe) + '" data-f="farbe" aria-label="Farbe">' +
+      '<label class="kid"><input type="checkbox" data-f="ist_kind"' + (m.ist_kind ? " checked" : "") + '> Kind</label>' +
+      '<button class="btn icon danger" type="button" data-act="member-weg" data-id="' + m.id + '" aria-label="entfernen">✕</button>' +
+    '</div>').join("");
+
+  return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
+    '<h2>Einstellungen</h2>' +
+    '<div class="field"><label for="st-hh">Haushalt</label>' +
+      '<input id="st-hh" type="text" value="' + esc(state.household ? state.household.name : "") + '"></div>' +
+    '<div class="field"><label>Familienmitglieder</label>' + (rows || '<p class="hint">Noch niemand angelegt.</p>') + '</div>' +
+    '<div class="row"><button class="btn" type="button" data-act="member-neu" style="flex:0 0 auto">+ Person</button></div>' +
+    '<div class="field"><label>Haushalts-Code</label>' +
+      '<div class="code">' + esc(state.membership ? state.membership.household_id : "") + '</div>' +
+      '<span class="hint">Damit tritt ein weiteres Gerät oder Konto demselben Haushalt bei.</span></div>' +
+    '<div class="field"><label>Angemeldet als</label><span class="hint">' + esc(state.session.user.email || "") + '</span></div>' +
+    '<div class="actions">' +
+      '<button class="btn danger" type="button" data-act="logout">Abmelden</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Schließen</button>' +
+      '<button class="btn primary" type="button" data-act="einst-speichern"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
+    '</div>' +
+  '</div></div>';
+}
+
+/* =========================================================
+   7. Dialog-Zustand aus Formularfeldern einsammeln
+   ========================================================= */
+function dialogLesen(){
+  const d = state.dialog; if(!d) return;
+  const g = (id,f) => { const el = $(id); if(el) d[f] = el.value; };
+  g("#ev-titel","titel"); g("#ev-ort","ort"); g("#ev-notiz","notiz");
+  g("#ev-vd","vd"); g("#ev-bd","bd");
+  if(!d.ganztags){ g("#ev-vt","vt"); g("#ev-bt","bt"); }
+  const wdh = $("#ev-wdh"); if(wdh) d.wiederholung = wdh.value;
+  const bis = $("#ev-bis"); d.wiederholung_bis = bis ? (bis.value || null) : d.wiederholung_bis;
+}
+
+function neuerDialog(datum, ev){
+  if(ev){
+    const s = new Date(ev.start_at), e = new Date(ev.end_at);
+    return {
+      id:ev.id, titel:ev.titel, ort:ev.ort||"", notiz:ev.notiz||"",
+      ganztags:!!ev.ganztags, vd:ymd(s), vt:hm(s), bd:ymd(e), bt:hm(e),
+      wiederholung:ev.wiederholung||"keine", wiederholung_bis:ev.wiederholung_bis||null,
+      member_ids:(ev.member_ids||[]).slice(), error:null
+    };
+  }
+  const d = datum ? parseYmd(datum) : startOfDay(new Date());
+  const jetzt = new Date();
+  const stunde = datum && !sameDay(d, jetzt) ? 9 : Math.min(22, jetzt.getHours() + 1);
+  return {
+    id:null, titel:"", ort:"", notiz:"", ganztags:false,
+    vd:ymd(d), vt:pad(stunde)+":00", bd:ymd(d), bt:pad(Math.min(23,stunde+1))+":00",
+    wiederholung:"keine", wiederholung_bis:null, member_ids:[], error:null
+  };
+}
+
+/* =========================================================
+   8. Aktionen
+   ========================================================= */
+document.addEventListener("click", async function(e){
+  const el = e.target.closest("[data-act]");
+  if(!el) return;
+  const act = el.dataset.act;
+
+  if(act === "backdrop" && e.target === el){ state.dialog=null; state.settings=false; return render(); }
+  if(el.tagName === "FORM") return;
+
+  switch(act){
+    case "view":
+      state.view = el.dataset.v; localStorage.setItem("fp.view", state.view); state.expanded=null; return render();
+    case "prev":
+    case "next": {
+      const n = act === "prev" ? -1 : 1;
+      state.cursor = state.view === "monat" ? addMonths(state.cursor, n)
+                   : state.view === "woche" ? addDays(state.cursor, 7*n)
+                   : addDays(state.cursor, n);
+      state.expanded = null; return render();
+    }
+    case "heute": state.cursor = new Date(); state.expanded=null; return render();
+    case "mehr": state.expanded = (state.expanded === el.dataset.d) ? null : el.dataset.d; return render();
+    case "filter": {
+      const id = el.dataset.id;
+      if(state.hidden.has(id)) state.hidden.delete(id); else state.hidden.add(id);
+      localStorage.setItem("fp.hidden", JSON.stringify([...state.hidden]));
+      return render();
+    }
+    case "neu": state.dialog = neuerDialog(state.view === "tag" ? ymd(state.cursor) : null); return render();
+    case "tag-neu": state.dialog = neuerDialog(el.dataset.d); return render();
+    case "oeffnen": {
+      const ev = state.events.find(x => x.id === el.dataset.id);
+      if(ev) state.dialog = neuerDialog(null, ev);
+      return render();
+    }
+    case "schliessen": state.dialog=null; state.settings=false; return render();
+    case "einstellungen": state.settings = true; return render();
+
+    case "ganztags":
+      dialogLesen(); state.dialog.ganztags = el.checked; return render();
+    case "wdh":
+      dialogLesen(); return render();
+    case "who": {
+      dialogLesen();
+      const ids = state.dialog.member_ids, id = el.dataset.id, i = ids.indexOf(id);
+      if(i >= 0) ids.splice(i,1); else ids.push(id);
+      return render();
+    }
+    case "loeschen":   return terminLoeschen();
+    case "member-neu": return mitgliedAnlegen();
+    case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "einst-speichern": return einstellungenSpeichern();
+    case "logout":
+      if(channel){ sb.removeChannel(channel); channel=null; }
+      await sb.auth.signOut();
+      state.session=null; state.membership=null; state.settings=false;
+      return render();
+  }
+});
+
+document.addEventListener("submit", async function(e){
+  const form = e.target.closest("[data-act]");
+  if(!form) return;
+  e.preventDefault();
+  const act = form.dataset.act;
+  if(act === "login")             return anmelden();
+  if(act === "speichern")         return terminSpeichern();
+  if(act === "haushalt-neu")      return haushaltAnlegen();
+  if(act === "haushalt-beitreten")return haushaltBeitreten();
+});
+
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && (state.dialog || state.settings)){ state.dialog=null; state.settings=false; render(); }
+});
+
+async function anmelden(){
+  state.busy = true; state.authError = null; render();
+  const { error } = await sb.auth.signInWithPassword({
+    email: $("#lg-mail").value.trim(), password: $("#lg-pw").value
+  });
+  state.busy = false;
+  if(error){ state.authError = "Anmeldung fehlgeschlagen: " + error.message; render(); }
+}
+
+async function haushaltAnlegen(){
+  state.busy = true; state.authError = null; render();
+  try{
+    const name = ($("#hh-name") ? $("#hh-name").value.trim() : "") || "Familie";
+    const namen = ($("#hh-mitglieder") ? $("#hh-mitglieder").value : "")
+      .split("\n").map(s => s.trim()).filter(Boolean);
+
+    const hh = await sb.from("households").insert({ name }).select().single();
+    if(hh.error) throw hh.error;
+
+    if(namen.length){
+      const rows = namen.map((n,i) => ({
+        household_id: hh.data.id, name: n,
+        kuerzel: n.slice(0,2), farbe: FARBEN[i % FARBEN.length], sortierung: i
+      }));
+      const mem = await sb.from("members").insert(rows);
+      if(mem.error) throw mem.error;
+    }
+    const ms = await sb.from("memberships").insert({
+      user_id: state.session.user.id, household_id: hh.data.id, rolle: "erwachsen"
+    });
+    if(ms.error) throw ms.error;
+    await loadAll();
+  }catch(err){ state.authError = err.message || String(err); }
+  state.busy = false; render();
+}
+
+async function haushaltBeitreten(){
+  state.busy = true; state.authError = null; render();
+  try{
+    const code = $("#hh-code").value.trim();
+    if(!code) throw new Error("Bitte den Haushalts-Code eintragen.");
+    const ms = await sb.from("memberships").insert({
+      user_id: state.session.user.id, household_id: code, rolle: "erwachsen"
+    });
+    if(ms.error) throw ms.error;
+    await loadAll();
+  }catch(err){ state.authError = "Beitritt nicht möglich: " + (err.message || err); }
+  state.busy = false; render();
+}
+
+async function terminSpeichern(){
+  dialogLesen();
+  const d = state.dialog;
+  if(!d.titel.trim()){ d.error = "Bitte einen Titel eintragen."; return render(); }
+
+  let s, e;
+  if(d.ganztags){ s = fromInputs(d.vd, "00:00"); e = endOfDay(fromInputs(d.bd, "00:00")); }
+  else { s = fromInputs(d.vd, d.vt); e = fromInputs(d.bd, d.bt); }
+  if(e < s){ d.error = "Das Ende liegt vor dem Beginn."; return render(); }
+
+  const daten = {
+    household_id: state.membership.household_id,
+    titel: d.titel.trim(), ort: d.ort.trim(), notiz: d.notiz.trim(),
+    ganztags: d.ganztags, start_at: s.toISOString(), end_at: e.toISOString(),
+    wiederholung: d.wiederholung,
+    wiederholung_bis: d.wiederholung === "keine" ? null : (d.wiederholung_bis || null),
+    member_ids: d.member_ids
+  };
+
+  state.busy = true; render();
+  try{
+    if(d.id){
+      const r = await sb.from("events").update(daten).eq("id", d.id);
+      if(r.error) throw r.error;
+    }else{
+      daten.created_by = state.session.user.id;
+      const r = await sb.from("events").insert(daten);
+      if(r.error) throw r.error;
+    }
+    state.dialog = null;
+    await neuLaden();
+    setToast(d.id ? "Termin gespeichert" : "Termin angelegt");
+  }catch(err){ state.dialog.error = err.message || String(err); }
+  state.busy = false; render();
+}
+
+async function terminLoeschen(){
+  const d = state.dialog;
+  if(!d || !d.id) return;
+  if(!confirm("Diesen Termin löschen?" + (d.wiederholung !== "keine" ? " Die ganze Serie wird entfernt." : ""))) return;
+  state.busy = true; render();
+  try{
+    const r = await sb.from("events").delete().eq("id", d.id);
+    if(r.error) throw r.error;
+    state.dialog = null;
+    await neuLaden();
+    setToast("Termin gelöscht");
+  }catch(err){ state.dialog.error = err.message || String(err); }
+  state.busy = false; render();
+}
+
+async function mitgliedAnlegen(){
+  const name = prompt("Name der Person:");
+  if(!name || !name.trim()) return;
+  const n = name.trim();
+  const r = await sb.from("members").insert({
+    household_id: state.membership.household_id, name: n,
+    kuerzel: n.slice(0,2), farbe: FARBEN[state.members.length % FARBEN.length],
+    sortierung: state.members.length
+  });
+  if(r.error) return setToast("Fehler: " + r.error.message);
+  await neuLaden(); render();
+}
+
+async function mitgliedEntfernen(id){
+  const m = memberById(id); if(!m) return;
+  if(!confirm(m.name + " entfernen? Termine bleiben erhalten, verlieren aber die Zuordnung.")) return;
+  const r = await sb.from("members").delete().eq("id", id);
+  if(r.error) return setToast("Fehler: " + r.error.message);
+  await neuLaden(); render();
+}
+
+async function einstellungenSpeichern(){
+  state.busy = true; render();
+  try{
+    const hn = $("#st-hh");
+    if(hn && state.household && hn.value.trim() && hn.value.trim() !== state.household.name){
+      const r = await sb.from("households").update({ name: hn.value.trim() }).eq("id", state.household.id);
+      if(r.error) throw r.error;
+    }
+    const rows = document.querySelectorAll(".memberrow");
+    for(const row of rows){
+      const id = row.dataset.mid, m = memberById(id);
+      if(!m) continue;
+      const v = f => row.querySelector('[data-f="' + f + '"]');
+      const neu = {
+        name: v("name").value.trim() || m.name,
+        kuerzel: v("kuerzel").value.trim(),
+        farbe: v("farbe").value,
+        ist_kind: v("ist_kind").checked
+      };
+      if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe || neu.ist_kind !== m.ist_kind){
+        const r = await sb.from("members").update(neu).eq("id", id);
+        if(r.error) throw r.error;
+      }
+    }
+    await neuLaden();
+    state.settings = false;
+    setToast("Gespeichert");
+  }catch(err){ setToast("Fehler: " + (err.message || err)); }
+  state.busy = false; render();
+}
+
+async function neuLaden(){
+  const hid = state.membership.household_id;
+  const [hh, mem, ev] = await Promise.all([
+    sb.from("households").select("*").eq("id", hid).maybeSingle(),
+    sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
+    sb.from("events").select("*").eq("household_id", hid).order("start_at")
+  ]);
+  if(hh.data)  state.household = hh.data;
+  if(mem.data) state.members = mem.data;
+  if(ev.data)  state.events  = ev.data;
+}
+
+/* =========================================================
+   9. Start
+   ========================================================= */
+async function start(){
+  if(!sb){ render(); return; }
+  const { data } = await sb.auth.getSession();
+  state.session = data.session || null;
+  if(state.session){
+    try{ await loadAll(); }
+    catch(err){ state.authError = err.message || String(err); }
+  }
+  state.ready = true; render();
+
+  sb.auth.onAuthStateChange(async (_evt, session)=>{
+    const vorher = state.session ? state.session.user.id : null;
+    state.session = session || null;
+    if(state.session && state.session.user.id !== vorher){
+      try{ await loadAll(); }catch(err){ state.authError = err.message || String(err); }
+    }
+    render();
+  });
+
+  // Bei Rückkehr auf das Wandtablet still abgleichen
+  document.addEventListener("visibilitychange", ()=>{
+    if(!document.hidden && state.membership) refreshQuiet();
+  });
+}
+render();
+start();
+
+})();
+</script>
+</body>
+</html>
