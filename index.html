@@ -800,7 +800,10 @@ async function anmelden(){
   state.busy = true; state.authError = null; render();
   const { error } = await sb.auth.signInWithPassword({ email: mail, password: pw });
   state.busy = false;
-  if(error){ state.authError = "Anmeldung fehlgeschlagen: " + error.message; render(); }
+  if(error) state.authError = "Anmeldung fehlgeschlagen: " + error.message;
+  // Immer neu zeichnen: sonst bleibt der nächste Bildschirm im Zustand "busy"
+  // stehen und seine Buttons sind dauerhaft deaktiviert.
+  render();
 }
 
 async function haushaltAnlegen(){
