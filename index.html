@@ -1855,7 +1855,16 @@ document.addEventListener("click", async function(e){
   if(Date.now() - wischGerade < 400) return;
   const act = el.dataset.act;
 
-  if(act === "backdrop" && e.target === el){ return obersteSchliessen(); }
+  // Auswahlfelder melden sich über "change". Würde schon der Klick die
+  // Oberfläche neu zeichnen, verschwände das Feld, während das Handy seine
+  // Auswahlliste dazu öffnet — die Auswahl ginge verloren.
+  if(e.target.tagName === "SELECT") return;
+  // Nur schließen, wenn schon das Aufsetzen des Fingers den Hintergrund traf.
+  // Nach einer Auswahlliste schickt Android sonst einen Klick hinterher, der
+  // auf dem Hintergrund landet und den Dialog schließen würde.
+  if(act === "backdrop" && e.target === el){
+    return (hintergrundStart === el) ? obersteSchliessen() : undefined;
+  }
   if(el.tagName === "FORM") return;
 
   // Ohne diesen Mantel bleibt ein Programmfehler unsichtbar: der Knopf
@@ -1904,8 +1913,7 @@ async function aktion(act, el){
 
     case "ganztags":
       dialogLesen(); state.dialog.ganztags = el.checked; state.dialog.erinnerung = ""; return render();
-    case "wdh":
-      dialogLesen(); return render();
+
     case "umfang":
       dialogLesen(); state.dialog.umfang = el.dataset.w; return render();
     case "who": {
@@ -2085,7 +2093,15 @@ document.addEventListener("touchend", function(e){
 
 document.addEventListener("change", async function(e){
   const el = e.target.closest("[data-act]");
-  if(!el || !state.importer) return;
+  if(!el) return;
+
+  // Wiederholung im Termin-Dialog
+  if(el.dataset.act === "wdh" && state.dialog){
+    dialogLesen();
+    state.dialog.wiederholung = el.value;
+    return render();
+  }
+  if(!state.importer) return;
 
   if(el.dataset.act === "ab-datum"){
     state.importer.abDatum = el.value;
@@ -2572,7 +2588,12 @@ function dienstRegistrieren(){
    Tageswechsel nachführen und ab und zu still abgleichen.
    --------------------------------------------------------- */
 let letzterTag = null, letzteBedienung = Date.now(), abgleichZaehler = 0;
-document.addEventListener("pointerdown", function(){ letzteBedienung = Date.now(); }, true);
+let hintergrundStart = null;
+document.addEventListener("pointerdown", function(e){
+  letzteBedienung = Date.now();
+  const b = e.target.closest ? e.target.closest('[data-act="backdrop"]') : null;
+  hintergrundStart = (b && e.target === b) ? b : null;
+}, true);
 
 function zeitgeberStarten(){
   letzterTag = ymd(new Date());
