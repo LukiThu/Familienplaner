@@ -209,6 +209,16 @@ button.pill:hover{filter:brightness(1.08)}
 .railitem .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- Dialog ---------- */
+.modal.schmal{max-width:420px}
+.segment{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px}
+.segment button{
+  flex:1 1 0;min-height:36px;padding:0 10px;border:none;border-radius:7px;background:transparent;
+  font-size:14px;font-weight:500;color:var(--muted);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.segment button[aria-pressed="true"]{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.btn.danger-voll{background:var(--danger);border-color:var(--danger);color:#fff;font-weight:600}
+.btn.danger-voll:hover{filter:brightness(1.07)}
 .backdrop{position:fixed;inset:0;background:rgba(10,16,12,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto;z-index:50}
 .modal{
   width:100%;max-width:520px;background:var(--surface);border:1px solid var(--line);
@@ -278,10 +288,11 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .topbar .viewtabs{order:1}
   .topbar .spacer{order:2}
   .topbar [data-act="neu"]{order:3}
-  .topbar [data-act="einstellungen"]{order:4}
+  .topbar [data-act="suche-oeffnen"]{order:4}
+  .topbar [data-act="einstellungen"]{order:5}
   .topbar [data-act="neu"] .lbl{display:none}
-  .topbar .datenav{order:5;width:100%;justify-content:space-between}
-  .topbar .filters{order:6;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .topbar .datenav{order:6;width:100%;justify-content:space-between}
+  .topbar .filters{order:7;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .topbar .filters::-webkit-scrollbar{display:none}
   .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:10px}
@@ -374,12 +385,13 @@ const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
 
 const state = {
   ready:false, session:null, membership:null, household:null,
-  members:[], events:[], templates:[], reminders:[], push:"unbekannt",
+  members:[], events:[], templates:[], reminders:[], push:"unbekannt", fenster:null, suche:null, zaehler:null,
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
   dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false,
+  frage:null, ladefehler:null, tablet: localStorage.getItem("fp.tablet") === "1",
   authError:null, busy:false, toast:null
 };
 let channel = null, toastTimer = null;
@@ -394,6 +406,50 @@ function memberById(id){ return state.members.find(m=>m.id===id) || null; }
 /* =========================================================
    4. Daten laden
    ========================================================= */
+// Termine werden nur für einen Zeitraum geladen; Serien immer vollständig,
+// weil sie in jeden Monat hineinreichen können.
+const FENSTER_ZURUECK = 6, FENSTER_VORAUS = 18;   // Monate
+
+async function termineAbfragen(hid, von, bis){
+  const [serien, einzeln] = await Promise.all([
+    sb.from("events").select("*").eq("household_id", hid).neq("wiederholung", "keine").order("start_at"),
+    sb.from("events").select("*").eq("household_id", hid).eq("wiederholung", "keine")
+      .gte("start_at", von.toISOString()).lte("start_at", bis.toISOString()).order("start_at")
+  ]);
+  if(serien.error) throw serien.error;
+  if(einzeln.error) throw einzeln.error;
+  return (serien.data || []).concat(einzeln.data || []);
+}
+
+function sichtGrenzen(){
+  const c = state.cursor;
+  if(state.view === "monat"){
+    const start = mondayOf(new Date(c.getFullYear(), c.getMonth(), 1));
+    return { von: start, bis: endOfDay(addDays(start, 41)) };
+  }
+  if(state.view === "woche"){
+    const mo = mondayOf(c);
+    return { von: mo, bis: endOfDay(addDays(mo, 6)) };
+  }
+  return { von: startOfDay(c), bis: endOfDay(c) };
+}
+
+// Blättert jemand aus dem geladenen Zeitraum heraus, wird nachgeladen.
+async function sicherstellenGeladen(){
+  if(!state.membership || !state.fenster) return;
+  const sicht = sichtGrenzen();
+  if(sicht.von >= state.fenster.von && sicht.bis <= state.fenster.bis) return;
+  const neu = {
+    von: new Date(Math.min(state.fenster.von.getTime(), addMonths(sicht.von, -3).getTime())),
+    bis: new Date(Math.max(state.fenster.bis.getTime(), addMonths(sicht.bis, 3).getTime()))
+  };
+  try{
+    state.events = await termineAbfragen(state.membership.household_id, neu.von, neu.bis);
+    state.fenster = neu;
+    render();
+  }catch(err){ /* beim nächsten Blättern erneut */ }
+}
+
 async function loadAll(){
   const uid = state.session.user.id;
   const ms = await sb.from("memberships").select("*").eq("user_id", uid).maybeSingle();
@@ -401,18 +457,22 @@ async function loadAll(){
   state.membership = ms.data;
   if(!state.membership){ state.household=null; state.members=[]; state.events=[]; return; }
 
+  const fenster = {
+    von: addMonths(startOfDay(new Date()), -FENSTER_ZURUECK),
+    bis: addMonths(startOfDay(new Date()),  FENSTER_VORAUS)
+  };
   const [hh, mem, ev, tpl] = await Promise.all([
     sb.from("households").select("*").eq("id", state.membership.household_id).maybeSingle(),
     sb.from("members").select("*").eq("household_id", state.membership.household_id).order("sortierung").order("name"),
-    sb.from("events").select("*").eq("household_id", state.membership.household_id).order("start_at"),
+    termineAbfragen(state.membership.household_id, fenster.von, fenster.bis),
     sb.from("templates").select("*").eq("household_id", state.membership.household_id).order("sortierung").order("titel")
   ]);
   if(hh.error) throw hh.error;
   if(mem.error) throw mem.error;
-  if(ev.error) throw ev.error;
   state.household = hh.data;
   state.members = mem.data || [];
-  state.events  = ev.data || [];
+  state.events  = ev;
+  state.fenster = fenster;
   state.templates = tpl.error ? [] : (tpl.data || []);
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   state.reminders = rem.error ? [] : (rem.data || []);
@@ -433,13 +493,15 @@ function refreshQuiet(){
   refreshTimer = setTimeout(async ()=>{
     try{
       const hid = state.membership.household_id;
+      const f = state.fenster || { von: addMonths(startOfDay(new Date()), -FENSTER_ZURUECK),
+                                   bis: addMonths(startOfDay(new Date()),  FENSTER_VORAUS) };
       const [mem, ev, tpl] = await Promise.all([
         sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
-        sb.from("events").select("*").eq("household_id", hid).order("start_at"),
+        termineAbfragen(hid, f.von, f.bis),
         sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
       ]);
       if(!mem.error) state.members = mem.data || [];
-      if(!ev.error)  state.events  = ev.data || [];
+      state.events = ev;
       if(!tpl.error) state.templates = tpl.data || [];
       render();
     }catch(e){ /* stiller Abgleich — Fehler beim nächsten Versuch */ }
@@ -498,8 +560,14 @@ function naechsteWiederholung(d, art){
   return null;
 }
 
+function datumText(ymdStr){
+  const d = parseYmd(ymdStr);
+  return WDS[(d.getDay()+6)%7] + ", " + d.getDate() + ". " + MONATE[d.getMonth()];
+}
+
 function occurrences(ev, from, to){
   const out = [];
+  const ausnahmen = ev.ausnahmen || [];
   const s0 = new Date(ev.start_at), e0 = new Date(ev.end_at);
   const dur = Math.max(0, e0 - s0);
   if(ev.wiederholung === "keine"){
@@ -508,11 +576,20 @@ function occurrences(ev, from, to){
   }
   const bis = ev.wiederholung_bis ? endOfDay(parseYmd(ev.wiederholung_bis)) : null;
   let cur = new Date(s0);
+  // Bei täglichen und wöchentlichen Serien gleich in die Nähe springen,
+  // statt Jahre in Einzelschritten durchzuzählen.
+  const periode = { taeglich:1, woechentlich:7, zweiwoechentlich:14 }[ev.wiederholung];
+  if(periode && from > s0){
+    const tage = Math.floor((from - s0) / 86400000);
+    const k = Math.max(0, Math.floor(tage / periode) - 1);
+    if(k) cur = addDays(cur, k * periode);
+  }
   for(let i=0; i<800; i++){
     if(bis && cur > bis) break;
     if(cur > to) break;
     const e = new Date(cur.getTime() + dur);
-    if(e >= from) out.push({ ev, s:new Date(cur), e });
+    // Einzeln abgesagte Tage fallen aus der Serie heraus.
+    if(e >= from && ausnahmen.indexOf(ymd(cur)) < 0) out.push({ ev, s:new Date(cur), e });
     const weiter = naechsteWiederholung(cur, ev.wiederholung);
     if(!weiter) break;
     cur = weiter;
@@ -536,6 +613,26 @@ function occurrencesInRange(from, to){
   });
   return out;
 }
+// Alle Vorkommen eines Zeitraums nach Tagen sortiert — einmal je Ansicht
+// gerechnet statt einmal je Tageszelle.
+function occurrencesNachTag(von, bis){
+  const map = {};
+  occurrencesInRange(von, bis).forEach(function(o){
+    if(o.ev.ganztags){
+      let t = startOfDay(o.s) < von ? startOfDay(von) : startOfDay(o.s);
+      const ende = startOfDay(o.e);
+      for(let i = 0; i < 400 && t <= ende && t <= bis; i++){
+        (map[ymd(t)] = map[ymd(t)] || []).push(o);
+        t = addDays(t, 1);
+      }
+    }else if(o.s >= von && o.s <= bis){
+      const k = ymd(o.s);
+      (map[k] = map[k] || []).push(o);
+    }
+  });
+  return map;
+}
+
 function occurrencesOn(day){
   const von = startOfDay(day);
   return occurrencesInRange(von, endOfDay(day)).filter(o =>
@@ -773,7 +870,16 @@ function importVorbereiten(){
     const rr = v.RRULE ? rruleParse(v.RRULE[0].wert) : null;
     const serie = rr ? serieAbbilden(rr, dts.d)
                      : { art:"keine", bis:null, starts:[dts.d], marken:[""], hinweise:[] };
-    if(v.EXDATE) serie.hinweise.push("einzelne gelöschte Termine der Serie gehen verloren");
+    // Einzeln gelöschte Termine einer Serie kommen als Ausnahmen mit.
+    const ausnahmen = [];
+    if(v.EXDATE){
+      v.EXDATE.forEach(function(eintrag){
+        String(eintrag.wert).split(",").forEach(function(teil){
+          const d = icsDatum({ wert: teil.trim(), params: eintrag.params });
+          if(d) ausnahmen.push(ymd(d.d));
+        });
+      });
+    }
     serie.hinweise.forEach(h => hinweise.push({ titel, text:h }));
 
     const dauer = ende - dts.d;
@@ -796,6 +902,7 @@ function importVorbereiten(){
         wiederholung: serie.art,
         wiederholung_bis: serie.bis,
         member_ids: mitglieder,
+        ausnahmen: ausnahmen,
         created_by: state.session.user.id,
         extern_uid: uid + (serie.marken[i] || "")
       });
@@ -803,6 +910,49 @@ function importVorbereiten(){
   });
 
   return { rows, hinweise, uebersprungen, gefunden: im.roh.length };
+}
+
+/* =========================================================
+   Eigene Rückfragen statt der Browser-Dialoge
+   ========================================================= */
+
+// frage({...}) liefert ein Versprechen: true bzw. der eingegebene Text,
+// oder null bei Abbruch.
+function frage(opt){
+  return new Promise(function(aufloesen){
+    state.frage = Object.assign({ knopf:"OK", feld:null }, opt, { aufloesen });
+    overlayOeffnen();
+    render();
+  });
+}
+function frageAntwort(wert){
+  const f = state.frage;
+  state.frage = null;
+  chronikPruefen();
+  render();
+  if(f) f.aufloesen(wert);
+}
+// Wird aufgerufen, wenn alle Fenster auf einmal zugehen — ein offenes
+// Versprechen darf dabei nicht hängen bleiben.
+function frageVerwerfen(){
+  const f = state.frage;
+  state.frage = null;
+  if(f) f.aufloesen(null);
+}
+
+function dialogFrage(){
+  const f = state.frage;
+  return '<div class="backdrop" data-act="backdrop"><div class="modal schmal">' +
+    '<h2>' + esc(f.titel) + '</h2>' +
+    (f.text ? '<p class="small">' + esc(f.text) + '</p>' : "") +
+    (f.feld !== null
+      ? '<div class="field"><input id="frage-feld" type="text" value="' + esc(f.feld) + '" placeholder="' + esc(f.platzhalter || "") + '"></div>'
+      : "") +
+    '<div class="actions"><span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="frage-ab">Abbrechen</button>' +
+      '<button class="btn ' + (f.gefahr ? "danger-voll" : "primary") + '" type="button" data-act="frage-ok">' + esc(f.knopf) + '</button>' +
+    '</div>' +
+  '</div></div>';
 }
 
 /* =========================================================
@@ -937,19 +1087,27 @@ function render(){
   if(!sb){ app.innerHTML = viewConfigFehlt(); return; }
   if(!state.ready){ app.innerHTML = '<div class="center"><p class="hint">Wird geladen …</p></div>'; return; }
   if(!state.session){ app.innerHTML = viewLogin(); focusFirst(); return; }
-  if(!state.membership){ app.innerHTML = viewSetup(); focusFirst(); return; }
+  if(!state.membership){
+    app.innerHTML = state.ladefehler ? viewKeineVerbindung() : viewSetup();
+    focusFirst(); return;
+  }
 
   app.innerHTML =
     '<div class="shell">' + topbar() + '<div class="main">' +
       '<div class="content">' + (state.view==="monat" ? monatsAnsicht() : state.view==="woche" ? wochenAnsicht() : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div></div>' +
+    (state.suche ? dialogSuche() : "") +
     (state.tagDetail ? dialogTag() : "") +
     (state.vorlagenListe ? dialogVorlagen() : "") +
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
     (state.importer ? dialogImport() : "") +
+    (state.frage ? dialogFrage() : "") +
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
+  if(state.frage && state.frage.feld !== null){
+    setTimeout(function(){ const e = $("#frage-feld"); if(e){ e.focus(); e.select(); } }, 30);
+  }
 }
 function focusFirst(){
   const el = $("#app input, #app button.primary");
@@ -975,6 +1133,18 @@ function viewLogin(){
     '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>' + (state.busy ? "Moment …" : "Anmelden") + '</button>' +
     '<p class="hint">Konten werden im Supabase-Projekt angelegt, nicht hier.</p>' +
   '</form></div>';
+}
+
+// Eine fehlgeschlagene Abfrage darf nicht wie ein Konto ohne Haushalt
+// aussehen — am Wandtablet stünde sonst nach jedem Netzausfall „Einrichten“.
+function viewKeineVerbindung(){
+  return '<div class="center"><div class="card">' +
+    '<div class="brand"><span class="mark"></span>Familienplaner</div>' +
+    '<h1>Keine Verbindung</h1>' +
+    '<p class="hint">Die Termine konnten nicht geladen werden. Der Planer versucht es alle 15 Sekunden von selbst erneut.</p>' +
+    '<div class="err">' + esc(state.ladefehler) + '</div>' +
+    '<button class="btn primary" type="button" data-act="neu-laden"' + (state.busy ? " disabled" : "") + '>Jetzt erneut versuchen</button>' +
+  '</div></div>';
 }
 
 function viewSetup(){
@@ -1028,6 +1198,11 @@ function topbar(){
     '<div class="spacer"></div>' +
     '<div class="filters">' + chips + '</div>' +
     '<button class="btn primary" data-act="neu" aria-label="Termin anlegen">+<span class="lbl">&nbsp;Termin</span></button>' +
+    '<button class="btn icon ghost" data-act="suche-oeffnen" aria-label="Suchen">' +
+      '<svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">' +
+        '<circle cx="9" cy="9" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"></circle>' +
+        '<path d="M13.2 13.2 L17 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>' +
+      '</svg></button>' +
     '<button class="btn icon ghost" data-act="einstellungen" aria-label="Einstellungen">⚙</button>' +
   '</div>';
 }
@@ -1038,7 +1213,7 @@ function topbar(){
 function pillHtml(o, klickbar){
   const k = kuerzelOf(o.ev);
   const tag = klickbar ? "button" : "span";
-  const attr = klickbar ? ' data-act="oeffnen" data-id="' + o.ev.id + '"' : "";
+  const attr = klickbar ? ' data-act="oeffnen" data-id="' + o.ev.id + '" data-occ="' + ymd(o.s) + '"' : "";
   return '<' + tag + ' class="pill" ' + attr + ' style="' + farbenOf(o.ev) + '">' +
     (o.ev.ganztags ? "" : '<span class="t">' + hm(o.s) + '</span>') +
     (k ? '<span class="who">' + esc(k) + '</span>' : "") +
@@ -1052,11 +1227,12 @@ function monatsAnsicht(){
   const heute = new Date();
   const maxProTag = window.innerWidth < 641 ? 2 : 3;
 
+  const nachTag = occurrencesNachTag(start, endOfDay(addDays(start, 41)));
   let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
   for(let i=0; i<42; i++){
     const d = addDays(start, i);
-    const occ = occurrencesOn(d);
     const key = ymd(d);
+    const occ = nachTag[key] || [];
     const zeigen = occ.slice(0, maxProTag);
     const rest = occ.length - zeigen.length;
     const ft = feiertagAn(d);
@@ -1078,9 +1254,10 @@ function monatsAnsicht(){
 
 function wochenAnsicht(){
   const mo = mondayOf(state.cursor), heute = new Date();
+  const nachTag = occurrencesNachTag(mo, endOfDay(addDays(mo, 6)));
   let html = '<div class="weekgrid">';
   for(let i=0;i<7;i++){
-    const d = addDays(mo,i), occ = occurrencesOn(d), ft = feiertagAn(d);
+    const d = addDays(mo,i), occ = nachTag[ymd(d)] || [], ft = feiertagAn(d);
     html += '<div class="daycol' + (sameDay(d,heute) ? " today" : "") + (ft ? " feiertag" : "") + '">' +
       '<h3><span>' + WDS[i] + '</span><b>' + d.getDate() + '.</b></h3>' +
       (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
@@ -1093,7 +1270,7 @@ function wochenAnsicht(){
 
 function agendaItem(o){
   const ms = (o.ev.member_ids || []).map(memberById).filter(Boolean);
-  return '<button class="aitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
+  return '<button class="aitem" data-act="oeffnen" data-id="' + o.ev.id + '" data-occ="' + ymd(o.s) + '" style="' + farbenOf(o.ev) + '">' +
     '<span class="when">' + esc(zeitText(o)) + '</span>' +
     '<span class="body">' +
       '<span class="title">' + esc(o.ev.titel) + '</span>' +
@@ -1121,7 +1298,7 @@ function rail(){
     const occ = occurrencesOn(tag);
     return '<div class="railsec"><h2>' + titel + '</h2>' +
       (occ.length ? occ.map(o =>
-        '<button class="railitem" data-act="oeffnen" data-id="' + o.ev.id + '" style="' + farbenOf(o.ev) + '">' +
+        '<button class="railitem" data-act="oeffnen" data-id="' + o.ev.id + '" data-occ="' + ymd(o.s) + '" style="' + farbenOf(o.ev) + '">' +
           '<span class="t">' + (o.ev.ganztags ? "ganzt." : hm(o.s)) + '</span>' +
           '<span class="n">' + esc(o.ev.titel) + '</span></button>').join("")
         : '<span class="hint">Nichts eingetragen.</span>') +
@@ -1165,7 +1342,18 @@ function dialogTermin(){
       (d.wiederholung === "keine" ? "" :
         '<div class="field"><label for="ev-bis">Endet am (leer = ohne Ende)</label><input id="ev-bis" type="date" value="' + (d.wiederholung_bis || "") + '"></div>') +
     '</div>' +
-    (d.id && d.wiederholung !== "keine" ? '<p class="hint">Änderungen gelten für die ganze Serie.</p>' : "") +
+    (d.id && d.wiederholung !== "keine"
+      ? (d.occ
+          ? '<div class="field"><label>Gilt für</label><div class="segment">' +
+              '<button type="button" data-act="umfang" data-w="serie" aria-pressed="' + (d.umfang === "serie") + '">Ganze Serie</button>' +
+              '<button type="button" data-act="umfang" data-w="einzel" aria-pressed="' + (d.umfang === "einzel") + '">Nur ' + esc(datumText(d.occ)) + '</button>' +
+            '</div>' +
+            (d.umfang === "einzel"
+              ? '<span class="hint">Dieser eine Termin wird aus der Serie gelöst. Speichern legt ihn einzeln an, Löschen sagt ihn ab.</span>'
+              : '<span class="hint">Änderungen gelten für alle Termine der Serie.</span>') +
+          '</div>'
+          : '<p class="hint">Änderungen gelten für die ganze Serie.</p>')
+      : "") +
     '<div class="field"><label for="ev-erinnerung">Erinnerung — nur für dich</label>' +
       '<select id="ev-erinnerung">' +
         (d.ganztags ? ERINNERUNG_GANZTAGS : ERINNERUNG_ZEIT).map(o =>
@@ -1223,7 +1411,9 @@ function dialogEinstellungen(){
     '</div>';
   const rows = personen().map(m => zeile(m, true)).join("");
   const katRows = kategorien().map(m => zeile(m, false)).join("");
-  const importierte = state.events.filter(e => e.extern_uid).length;
+  const z = state.zaehler;
+  const importierte = z ? z.importiert : 0;
+  const gesamt = z ? z.gesamt : 0;
   const vorlagenZeilen = state.templates.map(v =>
     '<div class="vorlagerow" data-vid="' + v.id + '">' +
       '<input class="nm" type="text" value="' + esc(v.titel) + '" data-f="titel" aria-label="Titel">' +
@@ -1236,6 +1426,21 @@ function dialogEinstellungen(){
       '<input class="zt" type="time" value="' + esc(v.end_zeit) + '" data-f="end_zeit" aria-label="bis">' +
       '<button class="btn icon danger" type="button" data-act="vorlage-weg" data-id="' + v.id + '" aria-label="entfernen">✕</button>' +
     '</div>').join("");
+
+  // Am Wandtablet nur das Nötige zeigen: dort kommen auch die Kinder hin.
+  if(state.tablet){
+    return '<div class="backdrop" data-act="backdrop"><div class="modal schmal">' +
+      '<h2>Einstellungen</h2>' +
+      '<div class="field"><label>Haushalt</label><p class="small">' + esc(state.household ? state.household.name : "") + '</p></div>' +
+      '<label class="check"><input type="checkbox" data-act="feiertage"' + (state.feiertage ? " checked" : "") + '> Österreichische Feiertage anzeigen</label>' +
+      '<div class="field"><label>Wandtablet-Modus</label>' +
+        '<p class="small">Eingeschaltet. Verwalten, Importieren und Löschen sind auf diesem Gerät ausgeblendet.</p>' +
+        '<button class="btn" type="button" data-act="tablet-modus" style="align-self:flex-start">Modus beenden</button>' +
+        '<span class="hint">Schützt vor versehentlichem Tippen, nicht vor Absicht.</span></div>' +
+      '<div class="actions"><span class="spacer"></span>' +
+        '<button class="btn primary" type="button" data-act="schliessen">Schließen</button></div>' +
+    '</div></div>';
+  }
 
   return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
     '<h2>Einstellungen</h2>' +
@@ -1255,9 +1460,9 @@ function dialogEinstellungen(){
     '<div class="field"><label>Aufräumen</label>' +
       '<div class="row" style="justify-content:flex-start">' +
         '<button class="btn" type="button" data-act="weg-import" style="flex:0 0 auto"' + (importierte ? "" : " disabled") + '>' +
-          'Importierte löschen (' + importierte + ')</button>' +
-        '<button class="btn danger" type="button" data-act="weg-alle" style="flex:0 0 auto"' + (state.events.length ? "" : " disabled") + '>' +
-          'Alle Termine löschen (' + state.events.length + ')</button>' +
+          'Importierte löschen' + (z ? " (" + importierte + ")" : " …") + '</button>' +
+        '<button class="btn danger" type="button" data-act="weg-alle" style="flex:0 0 auto"' + (gesamt ? "" : " disabled") + '>' +
+          'Alle Termine löschen' + (z ? " (" + gesamt + ")" : " …") + '</button>' +
       '</div>' +
       '<span class="hint">Beides ist endgültig. Praktisch, wenn ein Import nicht so ausgefallen ist wie gedacht.</span></div>' +
     '<div class="field"><label>Aus einem anderen Kalender übernehmen</label>' +
@@ -1267,6 +1472,9 @@ function dialogEinstellungen(){
     '<div class="field"><label>Haushalts-Code</label>' +
       '<div class="code">' + esc(state.membership ? state.membership.household_id : "") + '</div>' +
       '<span class="hint">Damit tritt ein weiteres Gerät oder Konto demselben Haushalt bei.</span></div>' +
+    '<div class="field"><label>Wandtablet-Modus</label>' +
+      '<label class="check"><input type="checkbox" data-act="tablet-modus"' + (state.tablet ? " checked" : "") + '> Dieses Gerät ist das Wandtablet</label>' +
+      '<span class="hint">Blendet Verwalten, Importieren und Löschen aus, damit dort nichts versehentlich passiert.</span></div>' +
     '<div class="field"><label>Angemeldet als</label><span class="hint">' + esc(state.session.user.email || "") + '</span></div>' +
     '<div class="actions">' +
       '<button class="btn danger" type="button" data-act="logout">Abmelden</button>' +
@@ -1376,6 +1584,57 @@ function sichtbareVorlagen(){
   });
 }
 
+function dialogSuche(){
+  const su = state.suche;
+  const zeile = (t) => {
+    const d = new Date(t.start_at);
+    return '<button class="vzeile" type="button" data-act="such-treffer" data-id="' + t.id + '" style="' + farbenOf(t) + '">' +
+      '<span class="n">' + esc(t.titel) + '</span>' +
+      '<span class="t">' + d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear() +
+        (t.wiederholung !== "keine" ? " · Serie" : "") + '</span>' +
+    '</button>';
+  };
+  return '<div class="backdrop" data-act="backdrop"><form class="modal" data-act="suchen">' +
+    '<h2>Suchen</h2>' +
+    '<div class="row" style="align-items:flex-end">' +
+      '<div class="field" style="flex:1 1 auto"><label for="such-feld">Titel, Ort oder Notiz</label>' +
+        '<input id="such-feld" type="search" value="' + esc(su.text) + '" placeholder="mindestens zwei Zeichen"></div>' +
+      '<button class="btn primary" type="submit" style="flex:0 0 auto"' + (su.laeuft ? " disabled" : "") + '>' +
+        (su.laeuft ? "sucht …" : "Suchen") + '</button>' +
+    '</div>' +
+    (su.treffer === null
+      ? '<p class="hint">Durchsucht alle Termine des Haushalts, auch die außerhalb des angezeigten Zeitraums.</p>'
+      : su.treffer.length === 0
+        ? '<p class="empty">Nichts gefunden.</p>'
+        : '<div class="vliste">' + su.treffer.map(zeile).join("") + '</div>') +
+    '<div class="actions"><span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Schließen</button></div>' +
+  '</form></div>';
+}
+
+async function suchen(){
+  const feld = $("#such-feld");
+  state.suche.text = feld ? feld.value : "";
+  // Komma und Klammern trennen bei PostgREST die Bedingungen — hier raus.
+  const q = state.suche.text.trim().replace(/[,()*%]/g, " ").trim();
+  if(q.length < 2){ state.suche.treffer = []; return render(); }
+  state.suche.laeuft = true; render();
+  try{
+    const r = await sb.from("events").select("*")
+      .eq("household_id", state.membership.household_id)
+      .or("titel.ilike.%" + q + "%,ort.ilike.%" + q + "%,notiz.ilike.%" + q + "%")
+      .order("start_at", { ascending:false }).limit(50);
+    if(r.error) throw r.error;
+    state.suche.treffer = r.data || [];
+  }catch(err){
+    state.suche.treffer = [];
+    setToast("Suche fehlgeschlagen: " + ((err && err.message) || err));
+  }
+  state.suche.laeuft = false;
+  render();
+  const f = $("#such-feld"); if(f) f.focus();
+}
+
 function dialogVorlagen(){
   const tag = parseYmd(state.tagDetail);
   const liste = sichtbareVorlagen();
@@ -1433,7 +1692,7 @@ function dialogLesen(){
   const bis = $("#ev-bis"); d.wiederholung_bis = bis ? (bis.value || null) : d.wiederholung_bis;
 }
 
-function neuerDialog(datum, ev){
+function neuerDialog(datum, ev, occ){
   if(ev){
     const s = new Date(ev.start_at), e = new Date(ev.end_at);
     return {
@@ -1441,7 +1700,8 @@ function neuerDialog(datum, ev){
       ganztags:!!ev.ganztags, vd:ymd(s), vt:hm(s), bd:ymd(e), bt:hm(e),
       wiederholung:ev.wiederholung||"keine", wiederholung_bis:ev.wiederholung_bis||null,
       member_ids:(ev.member_ids||[]).slice(), error:null,
-      erinnerung: meineErinnerung(ev.id) ? String(meineErinnerung(ev.id).vorlauf_min) : ""
+      erinnerung: meineErinnerung(ev.id) ? String(meineErinnerung(ev.id).vorlauf_min) : "",
+      occ: occ || null, umfang: "serie"
     };
   }
   const d = datum ? parseYmd(datum) : startOfDay(new Date());
@@ -1450,7 +1710,8 @@ function neuerDialog(datum, ev){
   return {
     id:null, titel:"", ort:"", notiz:"", ganztags:false,
     vd:ymd(d), vt:pad(stunde)+":00", bd:ymd(d), bt:pad(Math.min(23,stunde+1))+":00",
-    wiederholung:"keine", wiederholung_bis:null, member_ids:[], error:null, erinnerung:""
+    wiederholung:"keine", wiederholung_bis:null, member_ids:[], error:null, erinnerung:"",
+    occ:null, umfang:"serie"
   };
 }
 
@@ -1471,7 +1732,8 @@ function overlayChronikLoesen(){
   if(dialogInChronik){ dialogInChronik = false; history.back(); }
 }
 function overlayOffen(){
-  return !!(state.dialog || state.settings || state.importer || state.tagDetail || state.vorlagenListe);
+  return !!(state.frage || state.dialog || state.settings || state.importer ||
+            state.tagDetail || state.vorlagenListe || state.suche);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -1480,17 +1742,20 @@ function chronikPruefen(){
 // Schließt nur die oberste Ebene: aus dem Termin zurück in den Tag,
 // aus dem Tag zurück in den Monat.
 function obersteSchliessen(){
-  if(state.importer)           state.importer = null;
+  if(state.frage)              return frageAntwort(null);
+  else if(state.importer)      state.importer = null;
   else if(state.dialog)        state.dialog = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
+  else if(state.suche)         state.suche = null;
   else if(state.tagDetail)     state.tagDetail = null;
   chronikPruefen();
   render();
 }
 function overlaySchliessen(){
+  frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
-  state.tagDetail = null; state.vorlagenListe = false;
+  state.tagDetail = null; state.vorlagenListe = false; state.suche = null;
   overlayChronikLoesen();
   render();
 }
@@ -1498,8 +1763,9 @@ function overlaySchliessen(){
 window.addEventListener("popstate", function(){
   dialogInChronik = false;
   if(overlayOffen()){
+    frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
-    state.tagDetail = null; state.vorlagenListe = false;
+    state.tagDetail = null; state.vorlagenListe = false; state.suche = null;
     render();
   }
 });
@@ -1538,7 +1804,8 @@ async function aktion(act, el){
       state.cursor = state.view === "monat" ? addMonths(state.cursor, n)
                    : state.view === "woche" ? addDays(state.cursor, 7*n)
                    : addDays(state.cursor, n);
-      return render();
+      render();
+      return sicherstellenGeladen();
     }
     case "heute": state.cursor = new Date(); return render();
     case "tag-detail": state.tagDetail = el.dataset.d; overlayOeffnen(); return render();
@@ -1552,16 +1819,20 @@ async function aktion(act, el){
     case "tag-neu": state.dialog = neuerDialog(el.dataset.d); overlayOeffnen(); return render();
     case "oeffnen": {
       const ev = state.events.find(x => x.id === el.dataset.id);
-      if(ev){ state.dialog = neuerDialog(null, ev); overlayOeffnen(); }
+      if(ev){ state.dialog = neuerDialog(null, ev, el.dataset.occ); overlayOeffnen(); }
       return render();
     }
     case "schliessen": return obersteSchliessen();
-    case "einstellungen": state.settings = true; overlayOeffnen(); return render();
+    case "einstellungen":
+      state.settings = true; overlayOeffnen(); render();
+      return zaehlerLaden();
 
     case "ganztags":
       dialogLesen(); state.dialog.ganztags = el.checked; state.dialog.erinnerung = ""; return render();
     case "wdh":
       dialogLesen(); return render();
+    case "umfang":
+      dialogLesen(); state.dialog.umfang = el.dataset.w; return render();
     case "who": {
       dialogLesen();
       const ids = state.dialog.member_ids, id = el.dataset.id, i = ids.indexOf(id);
@@ -1590,9 +1861,34 @@ async function aktion(act, el){
     case "member-neu": return mitgliedAnlegen("person");
     case "kategorie-neu": return mitgliedAnlegen("kategorie");
     case "member-weg": return mitgliedEntfernen(el.dataset.id);
+    case "frage-ok": {
+      const feld = $("#frage-feld");
+      return frageAntwort(feld ? feld.value.trim() : true);
+    }
+    case "frage-ab": return frageAntwort(null);
+    case "tablet-modus":
+      state.tablet = !state.tablet;
+      localStorage.setItem("fp.tablet", state.tablet ? "1" : "0");
+      return render();
+    case "neu-laden": return ladenMitWiederholung(true);
     case "push-an":   return pushEinschalten();
     case "push-aus":  return pushAusschalten();
     case "push-test": return pushTest();
+    case "suche-oeffnen":
+      state.suche = { text:"", treffer:null, laeuft:false };
+      overlayOeffnen(); render();
+      setTimeout(function(){ const f = $("#such-feld"); if(f) f.focus(); }, 30);
+      return;
+    case "such-treffer": {
+      const t = (state.suche.treffer || []).find(x => x.id === el.dataset.id);
+      if(!t) return;
+      state.cursor = new Date(t.start_at);
+      state.suche = null;
+      render();
+      await sicherstellenGeladen();
+      state.tagDetail = ymd(new Date(t.start_at));
+      return render();
+    }
     case "vorlagen-liste": state.vorlagenListe = true; return render();
     case "vorlage-neu":    return vorlageAnlegen();
     case "vorlage-weg":    return vorlageEntfernen(el.dataset.id);
@@ -1615,6 +1911,7 @@ document.addEventListener("submit", async function(e){
   e.preventDefault();
   const act = form.dataset.act;
   try{
+    if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
     if(act === "speichern")         return await terminSpeichern();
     if(act === "haushalt-neu")      return await haushaltAnlegen();
@@ -1636,6 +1933,7 @@ let zuletztGescrollt = 0, bekannteLage = null, bekannterBereich = null;
 function monatWechseln(richtung){
   state.cursor = addMonths(state.cursor, richtung);
   render();
+  sicherstellenGeladen();
 }
 // Nur wechseln, wenn in die gewünschte Richtung nichts mehr zu scrollen
 // ist — sonst ließe sich ein hohes Raster nicht mehr durchsehen.
@@ -1820,7 +2118,19 @@ async function terminSpeichern(){
   state.busy = true; render();
   try{
     let eventId = d.id;
-    if(d.id){
+    if(d.id && d.wiederholung !== "keine" && d.umfang === "einzel" && d.occ){
+      // Diesen einen Tag aus der Serie nehmen und als eigenen Termin anlegen.
+      const serie = state.events.find(x => x.id === d.id);
+      const ausnahmen = ((serie && serie.ausnahmen) || []).concat([d.occ]);
+      const a = await sb.from("events").update({ ausnahmen }).eq("id", d.id);
+      if(a.error) throw a.error;
+      daten.created_by = state.session.user.id;
+      daten.wiederholung = "keine";
+      daten.wiederholung_bis = null;
+      const r = await sb.from("events").insert(daten).select("id").single();
+      if(r.error) throw r.error;
+      eventId = r.data.id;
+    }else if(d.id){
       const r = await sb.from("events").update(daten).eq("id", d.id);
       if(r.error) throw r.error;
     }else{
@@ -1841,24 +2151,40 @@ async function terminSpeichern(){
 async function terminLoeschen(){
   const d = state.dialog;
   if(!d || !d.id) return;
-  if(!confirm("Diesen Termin löschen?" + (d.wiederholung !== "keine" ? " Die ganze Serie wird entfernt." : ""))) return;
+  const einzeln = d.wiederholung !== "keine" && d.umfang === "einzel" && d.occ;
+  if(!(await frage({
+    titel: einzeln ? "Diesen Termin absagen?" : "Termin löschen?",
+    text: einzeln ? "Nur " + datumText(d.occ) + " entfällt, die Serie bleibt bestehen."
+                  : (d.wiederholung !== "keine" ? "Die ganze Serie wird entfernt." : d.titel),
+    knopf: einzeln ? "Absagen" : "Löschen", gefahr: true
+  }))) return;
   state.busy = true; render();
   try{
-    const r = await sb.from("events").delete().eq("id", d.id);
-    if(r.error) throw r.error;
+    if(einzeln){
+      const serie = state.events.find(x => x.id === d.id);
+      const ausnahmen = ((serie && serie.ausnahmen) || []).concat([d.occ]);
+      const r = await sb.from("events").update({ ausnahmen }).eq("id", d.id);
+      if(r.error) throw r.error;
+    }else{
+      const r = await sb.from("events").delete().eq("id", d.id);
+      if(r.error) throw r.error;
+    }
     state.dialog = null;
     chronikPruefen();
     await neuLaden();
-    setToast("Termin gelöscht");
+    setToast(einzeln ? "Termin abgesagt" : "Termin gelöscht");
   }catch(err){ state.dialog.error = err.message || String(err); }
   state.busy = false; render();
 }
 
 async function mitgliedAnlegen(art){
   const istKategorie = art === "kategorie";
-  const name = prompt(istKategorie ? "Name der Kategorie, z. B. Geburtstag:" : "Name der Person:");
-  if(!name || !name.trim()) return;
-  const n = name.trim();
+  const name = await frage(istKategorie
+    ? { titel:"Neue Kategorie", text:"Zum Beispiel Geburtstag.", feld:"", platzhalter:"Name", knopf:"Anlegen" }
+    : { titel:"Neue Person", feld:"", platzhalter:"Name", knopf:"Anlegen" });
+  if(!name) return;
+  const n = String(name).trim();
+  if(!n) return;
   const r = await sb.from("members").insert({
     household_id: state.membership.household_id, name: n,
     kuerzel: n.slice(0,2), farbe: FARBEN[state.members.length % FARBEN.length],
@@ -1871,7 +2197,7 @@ async function mitgliedAnlegen(art){
 
 async function mitgliedEntfernen(id){
   const m = memberById(id); if(!m) return;
-  if(!confirm(m.name + " entfernen? Termine bleiben erhalten, verlieren aber die Zuordnung.")) return;
+  if(!(await frage({ titel: m.name + " entfernen?", text:"Termine bleiben erhalten, verlieren aber die Zuordnung.", knopf:"Entfernen", gefahr:true }))) return;
   const r = await sb.from("members").delete().eq("id", id);
   if(r.error) return setToast("Fehler: " + r.error.message);
   await neuLaden(); render();
@@ -1909,8 +2235,8 @@ async function vorlageEinsetzen(id){
 }
 
 async function vorlageAnlegen(){
-  const titel = prompt("Titel der Vorlage, z. B. L1:");
-  if(!titel || !titel.trim()) return;
+  const titel = await frage({ titel:"Neue Vorlage", text:"Zum Beispiel L1.", feld:"", platzhalter:"Titel", knopf:"Anlegen" });
+  if(!titel || !String(titel).trim()) return;
   const r = await sb.from("templates").insert({
     household_id: state.membership.household_id,
     titel: titel.trim(), member_ids: [],
@@ -1923,22 +2249,38 @@ async function vorlageAnlegen(){
 
 async function vorlageEntfernen(id){
   const v = state.templates.find(x => x.id === id);
-  if(!v || !confirm("Vorlage „" + v.titel + "“ löschen? Bereits eingetragene Termine bleiben.")) return;
+  if(!v) return;
+  if(!(await frage({ titel:"Vorlage „" + v.titel + "“ löschen?", text:"Bereits eingetragene Termine bleiben.", knopf:"Löschen", gefahr:true }))) return;
   const r = await sb.from("templates").delete().eq("id", id);
   if(r.error) return setToast("Fehler: " + r.error.message);
   await neuLaden(); render();
 }
 
+// Wie viele Termine es insgesamt gibt, weiß nur die Datenbank — geladen
+// ist immer nur ein Zeitraum.
+async function zaehlerLaden(){
+  try{
+    const hid = state.membership.household_id;
+    const [alle, importiert] = await Promise.all([
+      sb.from("events").select("id", { count:"exact", head:true }).eq("household_id", hid),
+      sb.from("events").select("id", { count:"exact", head:true }).eq("household_id", hid).not("extern_uid", "is", null)
+    ]);
+    state.zaehler = { gesamt: alle.count || 0, importiert: importiert.count || 0 };
+    render();
+  }catch(err){ /* Knöpfe bleiben dann ohne Zahl */ }
+}
+
 async function termineLoeschen(nurImportierte){
-  const betroffen = nurImportierte
-    ? state.events.filter(e => e.extern_uid).length
-    : state.events.length;
+  const z = state.zaehler || { gesamt:0, importiert:0 };
+  const betroffen = nurImportierte ? z.importiert : z.gesamt;
   if(!betroffen) return;
 
-  const frage = nurImportierte
+  const text = nurImportierte
     ? betroffen + " importierte Termine löschen? Von Hand angelegte bleiben erhalten."
     : "Wirklich ALLE " + betroffen + " Termine im Haushalt „" + (state.household ? state.household.name : "") + "“ löschen?";
-  if(!confirm(frage + "\n\nDas lässt sich nicht rückgängig machen.")) return;
+  if(!(await frage({ titel: nurImportierte ? "Importierte Termine löschen?" : "Alle Termine löschen?",
+                     text: text + " Das lässt sich nicht rückgängig machen.",
+                     knopf:"Löschen", gefahr:true }))) return;
 
   state.busy = true; render();
   try{
@@ -2060,15 +2402,18 @@ async function importAusfuehren(){
 
 async function neuLaden(){
   const hid = state.membership.household_id;
+  const f = state.fenster || { von: addMonths(startOfDay(new Date()), -FENSTER_ZURUECK),
+                               bis: addMonths(startOfDay(new Date()),  FENSTER_VORAUS) };
   const [hh, mem, ev, tpl] = await Promise.all([
     sb.from("households").select("*").eq("id", hid).maybeSingle(),
     sb.from("members").select("*").eq("household_id", hid).order("sortierung").order("name"),
-    sb.from("events").select("*").eq("household_id", hid).order("start_at"),
+    termineAbfragen(hid, f.von, f.bis),
     sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
   ]);
   if(hh.data)  state.household = hh.data;
   if(mem.data) state.members = mem.data;
-  if(ev.data)  state.events  = ev.data;
+  state.events = ev;
+  state.fenster = f;
   if(tpl.data) state.templates = tpl.data;
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   if(rem.data) state.reminders = rem.data;
@@ -2077,22 +2422,39 @@ async function neuLaden(){
 /* =========================================================
    12. Start
    ========================================================= */
+let ladeTimer = null;
+// Laden mit automatischem Wiederholen: ein kurzer Netzausfall soll sich
+// von selbst erholen, ohne dass jemand die Seite neu lädt.
+async function ladenMitWiederholung(neuZeichnen){
+  clearTimeout(ladeTimer);
+  if(!state.session) return;
+  state.busy = !!neuZeichnen;
+  if(neuZeichnen) render();
+  try{
+    await loadAll();
+    state.ladefehler = null;
+  }catch(err){
+    state.ladefehler = (err && err.message) ? err.message : String(err);
+    ladeTimer = setTimeout(function(){ ladenMitWiederholung(true); }, 15000);
+  }
+  state.busy = false;
+  if(neuZeichnen) render();
+}
+
 async function start(){
   if(!sb){ render(); return; }
   const { data } = await sb.auth.getSession();
   state.session = data.session || null;
-  if(state.session){
-    try{ await loadAll(); }
-    catch(err){ state.authError = err.message || String(err); }
-  }
+  if(state.session) await ladenMitWiederholung(false);
   state.ready = true; render();
+  zeitgeberStarten();
   pushPruefen().then(render).catch(() => {});
 
   sb.auth.onAuthStateChange(async (_evt, session)=>{
     const vorher = state.session ? state.session.user.id : null;
     state.session = session || null;
     if(state.session && state.session.user.id !== vorher){
-      try{ await loadAll(); }catch(err){ state.authError = err.message || String(err); }
+      await ladenMitWiederholung(false);
     }
     render();
   });
@@ -2101,6 +2463,31 @@ async function start(){
   document.addEventListener("visibilitychange", ()=>{
     if(!document.hidden && state.membership) refreshQuiet();
   });
+}
+
+/* ---------------------------------------------------------
+   Zeitgeber — für Geräte, die dauernd laufen (Wandtablet):
+   Tageswechsel nachführen und ab und zu still abgleichen.
+   --------------------------------------------------------- */
+let letzterTag = null, letzteBedienung = Date.now(), abgleichZaehler = 0;
+document.addEventListener("pointerdown", function(){ letzteBedienung = Date.now(); }, true);
+
+function zeitgeberStarten(){
+  letzterTag = ymd(new Date());
+  setInterval(function(){
+    if(!state.membership) return;
+    const heute = ymd(new Date());
+    if(heute !== letzterTag){
+      letzterTag = heute;
+      // Liegt die letzte Bedienung lange zurück, zeigt das Gerät wieder
+      // den heutigen Tag. Wer gerade blättert, wird nicht gestört.
+      if(!overlayOffen() && Date.now() - letzteBedienung > 10 * 60000) state.cursor = new Date();
+      render();
+    }
+    // Sicherheitsnetz: Live-Änderungen können nach einem Verbindungsabbruch
+    // ausbleiben. Alle fünf Minuten nachziehen.
+    if(!document.hidden && (++abgleichZaehler % 5 === 0)) refreshQuiet();
+  }, 60000);
 }
 render();
 start();
