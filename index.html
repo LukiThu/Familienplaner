@@ -61,6 +61,7 @@ button{cursor:pointer}
 .btn[disabled]{opacity:.5;cursor:default}
 
 .field{display:flex;flex-direction:column;gap:6px}
+[hidden]{display:none !important}
 .field > label{font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
   width:100%;min-height:42px;padding:9px 11px;border-radius:8px;
@@ -238,7 +239,9 @@ button.pill:hover{filter:brightness(1.08)}
   display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 12px;border-radius:999px;
   border:1px solid var(--line-strong);background:var(--surface);font-size:14px;font-weight:600;
 }
-.whopick button[aria-pressed="true"]{background:var(--c);border-color:var(--c);color:#fff}
+.whopick button[aria-pressed="true"]{
+  background:var(--c,var(--accent));border-color:var(--c,var(--accent));color:#fff;
+}
 .whopick .dot{width:9px;height:9px;border-radius:50%;background:var(--c)}
 .whopick button[aria-pressed="true"] .dot{background:#fff}
 .check{display:flex;align-items:center;gap:9px;font-size:15px;min-height:42px}
@@ -331,6 +334,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
+const FASSUNG = "2026-09-20 20:44";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -340,13 +344,16 @@ const FARBEN = ["#C2701C","#276E7D","#A8385E","#57489B","#2F6B4F","#8A6D1F","#B2
 const WDS    = ["Mo","Di","Mi","Do","Fr","Sa","So"];
 const WDLANG = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"];
 const MONATE = ["Jänner","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+// [Wert, kurz für die Auswahl, lang für die Anzeige]
 const ERINNERUNG_ZEIT = [
-  ["", "keine"], ["0", "zur Startzeit"], ["5", "5 Minuten vorher"], ["15", "15 Minuten vorher"],
-  ["30", "30 Minuten vorher"], ["60", "1 Stunde vorher"], ["120", "2 Stunden vorher"], ["1440", "1 Tag vorher"]
+  ["", "keine", "keine"], ["0", "pünktlich", "zur Startzeit"],
+  ["5", "5 min", "5 Minuten vorher"], ["15", "15 min", "15 Minuten vorher"],
+  ["30", "30 min", "30 Minuten vorher"], ["60", "1 Std", "1 Stunde vorher"],
+  ["120", "2 Std", "2 Stunden vorher"], ["1440", "1 Tag", "1 Tag vorher"]
 ];
 // Ganztägige Termine beginnen um 00:00 — negativ heißt: nach Beginn.
 const ERINNERUNG_GANZTAGS = [
-  ["", "keine"], ["-420", "am Tag um 07:00"], ["300", "am Vortag um 19:00"]
+  ["", "keine", "keine"], ["-420", "07:00", "am Tag um 07:00"], ["300", "Vortag 19:00", "am Vortag um 19:00"]
 ];
 const WDH    = [
   ["keine","einmalig"],
@@ -1128,7 +1135,7 @@ function meineErinnerung(eventId){
 function erinnerungText(vorlauf, ganztags){
   const liste = ganztags ? ERINNERUNG_GANZTAGS : ERINNERUNG_ZEIT;
   const t = liste.find(x => x[0] === String(vorlauf));
-  return t ? t[1] : vorlauf + " Minuten vorher";
+  return t ? t[2] : vorlauf + " Minuten vorher";
 }
 
 async function erinnerungSpeichern(eventId, wert){
@@ -1410,11 +1417,16 @@ function dialogTermin(){
       (d.ganztags ? "" : '<div class="field"><label for="ev-bt">Uhrzeit</label><input id="ev-bt" type="time" value="' + d.bt + '"></div>') +
     '</div>' +
     '<div class="row">' +
-      '<div class="field"><label for="ev-wdh">Wiederholung</label><select id="ev-wdh" data-act="wdh">' +
-        WDH.map(w => '<option value="' + w[0] + '"' + (d.wiederholung===w[0] ? " selected" : "") + '>' + w[1] + '</option>').join("") +
-      '</select></div>' +
-      (d.wiederholung === "keine" ? "" :
-        '<div class="field"><label for="ev-bis">Endet am (leer = ohne Ende)</label><input id="ev-bis" type="date" value="' + (d.wiederholung_bis || "") + '"></div>') +
+      '<div class="field"><label for="ev-wdh">Wiederholung</label>' +
+        '<select id="ev-wdh">' +
+          WDH.map(w => '<option value="' + w[0] + '"' + (d.wiederholung===w[0] ? " selected" : "") + '>' + w[1] + '</option>').join("") +
+        '</select></div>' +
+      // Immer im Dokument, nur bei „einmalig“ ausgeblendet. So muss die
+      // Auswahl nichts neu zeichnen — genau wie beim Erinnerungsfeld, das
+      // deshalb auch unter Android funktioniert.
+      '<div class="field" id="ev-bis-feld"' + (d.wiederholung === "keine" ? " hidden" : "") + '>' +
+        '<label for="ev-bis">Endet am (leer = ohne Ende)</label>' +
+        '<input id="ev-bis" type="date" value="' + (d.wiederholung_bis || "") + '"></div>' +
     '</div>' +
     (d.id && d.wiederholung !== "keine"
       ? (d.occ
@@ -1431,7 +1443,7 @@ function dialogTermin(){
     '<div class="field"><label for="ev-erinnerung">Erinnerung — nur für dich</label>' +
       '<select id="ev-erinnerung">' +
         (d.ganztags ? ERINNERUNG_GANZTAGS : ERINNERUNG_ZEIT).map(o =>
-          '<option value="' + o[0] + '"' + (String(d.erinnerung) === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") +
+          '<option value="' + o[0] + '"' + (String(d.erinnerung) === o[0] ? " selected" : "") + '>' + o[2] + '</option>').join("") +
       '</select>' +
       (state.push !== "an"
         ? '<span class="hint">Auf diesem Gerät sind Erinnerungen aus — einschalten in den Einstellungen.</span>'
@@ -1507,6 +1519,7 @@ function dialogEinstellungen(){
       '<h2>Einstellungen</h2>' +
       '<div class="field"><label>Haushalt</label><p class="small">' + esc(state.household ? state.household.name : "") + '</p></div>' +
       '<label class="check"><input type="checkbox" data-act="feiertage"' + (state.feiertage ? " checked" : "") + '> Österreichische Feiertage anzeigen</label>' +
+      '<div class="field"><label>Fassung</label><span class="hint">' + esc(FASSUNG) + '</span></div>' +
       '<div class="field"><label>Wandtablet-Modus</label>' +
         '<p class="small">Eingeschaltet. Verwalten, Importieren und Löschen sind auf diesem Gerät ausgeblendet.</p>' +
         '<button class="btn" type="button" data-act="tablet-modus" style="align-self:flex-start">Modus beenden</button>' +
@@ -1550,6 +1563,7 @@ function dialogEinstellungen(){
       '<label class="check"><input type="checkbox" data-act="tablet-modus"' + (state.tablet ? " checked" : "") + '> Dieses Gerät ist das Wandtablet</label>' +
       '<span class="hint">Blendet Verwalten, Importieren und Löschen aus, damit dort nichts versehentlich passiert.</span></div>' +
     '<div class="field"><label>Angemeldet als</label><span class="hint">' + esc(state.session.user.email || "") + '</span></div>' +
+    '<div class="field"><label>Fassung</label><span class="hint">' + esc(FASSUNG) + '</span></div>' +
     '<div class="actions">' +
       '<button class="btn danger" type="button" data-act="logout">Abmelden</button>' +
       '<span class="spacer"></span>' +
@@ -1916,6 +1930,7 @@ async function aktion(act, el){
 
     case "umfang":
       dialogLesen(); state.dialog.umfang = el.dataset.w; return render();
+
     case "who": {
       dialogLesen();
       const ids = state.dialog.member_ids, id = el.dataset.id, i = ids.indexOf(id);
@@ -2091,16 +2106,20 @@ document.addEventListener("touchend", function(e){
   monatWechseln(weg > 0 ? 1 : -1);
 }, { passive:true });
 
+document.addEventListener("change", function(e){
+  // Wiederholung: nur das Enddatum ein- oder ausblenden. Kein Neuzeichnen —
+  // das würde dem Gerät das Feld unter der offenen Auswahlliste wegziehen.
+  if(e.target && e.target.id === "ev-wdh" && state.dialog){
+    state.dialog.wiederholung = e.target.value;
+    const feld = document.getElementById("ev-bis-feld");
+    if(feld) feld.hidden = (e.target.value === "keine");
+  }
+});
+
 document.addEventListener("change", async function(e){
   const el = e.target.closest("[data-act]");
   if(!el) return;
 
-  // Wiederholung im Termin-Dialog
-  if(el.dataset.act === "wdh" && state.dialog){
-    dialogLesen();
-    state.dialog.wiederholung = el.value;
-    return render();
-  }
   if(!state.importer) return;
 
   if(el.dataset.act === "ab-datum"){
