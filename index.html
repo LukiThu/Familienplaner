@@ -210,6 +210,29 @@ button.pill:hover{filter:brightness(1.08)}
 .railitem .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- Dialog ---------- */
+.aufgabe{
+  display:flex;align-items:stretch;gap:4px;margin-bottom:8px;
+  background:var(--surface);border:1px solid var(--line);
+  border-left:4px solid var(--c-bg,var(--line-strong));border-radius:var(--radius);
+}
+.aufgabe-haken{
+  flex:1 1 auto;display:flex;align-items:center;gap:12px;min-width:0;min-height:56px;
+  border:none;background:none;padding:11px 10px;text-align:left;font:inherit;color:inherit;
+}
+.aufgabe-haken:hover{background:var(--surface-3)}
+.kasten{
+  flex:none;width:26px;height:26px;border-radius:7px;border:2px solid var(--line-strong);
+  display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff;
+}
+.aufgabe.fertig .kasten{background:var(--accent);border-color:var(--accent)}
+.aufgabe .wort{display:flex;flex-direction:column;gap:2px;min-width:0}
+.aufgabe .titel{font-size:15.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aufgabe .meta{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aufgabe.fertig{opacity:.7}
+.aufgabe.fertig .titel{text-decoration:line-through;font-weight:500;color:var(--muted)}
+.rail .aufgabe{margin-bottom:6px}
+.rail .aufgabe-haken{min-height:44px;padding:7px 8px;gap:9px}
+.rail .kasten{width:21px;height:21px;font-size:13px}
 .offline-chip{
   display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;
   border-radius:999px;background:var(--warn-bg,var(--surface-2));color:var(--danger);
@@ -400,6 +423,7 @@ const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
 const state = {
   ready:false, session:null, membership:null, household:null,
   members:[], events:[], templates:[], reminders:[], push:"unbekannt", fenster:null, suche:null, zaehler:null,
+  tasks:[], erledigt:[], aufgabe:null,
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -465,6 +489,17 @@ async function sicherstellenGeladen(){
   }catch(err){ /* beim nächsten Blättern erneut */ }
 }
 
+async function aufgabenLaden(){
+  const hid = state.membership.household_id;
+  const ab = ymd(addDays(startOfDay(new Date()), -35));
+  const [auf, hak] = await Promise.all([
+    sb.from("tasks").select("*").eq("household_id", hid).order("sortierung").order("titel"),
+    sb.from("task_completions").select("*").eq("household_id", hid).gte("tag", ab)
+  ]);
+  if(!auf.error) state.tasks = auf.data || [];
+  if(!hak.error) state.erledigt = hak.data || [];
+}
+
 async function loadAll(){
   const uid = state.session.user.id;
   const ms = await sb.from("memberships").select("*").eq("user_id", uid).maybeSingle();
@@ -491,6 +526,7 @@ async function loadAll(){
   state.templates = tpl.error ? [] : (tpl.data || []);
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   state.reminders = rem.error ? [] : (rem.data || []);
+  await aufgabenLaden();
   subscribe();
 }
 
@@ -500,6 +536,8 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"events" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"members" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"templates" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"tasks" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"task_completions" }, refreshQuiet)
     .subscribe();
 }
 let refreshTimer = null;
@@ -517,6 +555,7 @@ function refreshQuiet(){
       ]);
       if(!mem.error) state.members = mem.data || [];
       state.events = ev;
+      await aufgabenLaden();
       state.offline = false;
       datenSichern();
       if(!tpl.error) state.templates = tpl.data || [];
@@ -930,6 +969,46 @@ function importVorbereiten(){
 }
 
 /* =========================================================
+   Aufgaben und Routinen
+   ========================================================= */
+
+const WD_KURZ = ["So","Mo","Di","Mi","Do","Fr","Sa"];   // getDay()-Reihenfolge
+
+function istRoutine(a){ return (a.wochentage || []).length > 0; }
+
+// Fällig an diesem Tag? Routinen an ihren Wochentagen, einmalige am Datum.
+function aufgabeFaellig(a, tag){
+  if(istRoutine(a)) return a.wochentage.indexOf(tag.getDay()) >= 0;
+  return !!a.faellig_am && a.faellig_am === ymd(tag);
+}
+function abgehakt(a, tag){
+  const t = ymd(tag);
+  return state.erledigt.some(h => h.task_id === a.id && h.tag === t);
+}
+// Einmalige Aufgaben, deren Tag vorbei ist und die niemand erledigt hat.
+function ueberfaellig(){
+  const heute = ymd(new Date());
+  return state.tasks.filter(a =>
+    !istRoutine(a) && a.faellig_am && a.faellig_am < heute && !abgehakt(a, parseYmd(a.faellig_am)) && sichtbarFuerFilter(a)
+  ).sort((x,y) => x.faellig_am < y.faellig_am ? -1 : 1);
+}
+function sichtbarFuerFilter(a){
+  const ids = a.member_ids || [];
+  if(!ids.length || !state.hidden.size) return true;
+  return ids.some(id => !state.hidden.has(id));
+}
+function aufgabenAn(tag){
+  return state.tasks
+    .filter(a => aufgabeFaellig(a, tag) && sichtbarFuerFilter(a))
+    .sort((x,y) => (x.sortierung - y.sortierung) || String(x.titel).localeCompare(String(y.titel), "de"));
+}
+function rhythmusText(a){
+  if(!istRoutine(a)) return a.faellig_am ? "einmalig am " + datumText(a.faellig_am) : "ohne Termin";
+  if(a.wochentage.length === 7) return "täglich";
+  return a.wochentage.slice().sort().map(n => WD_KURZ[n]).join(", ");
+}
+
+/* =========================================================
    Offline lesen: letzten Stand im Gerät behalten
    ========================================================= */
 
@@ -945,6 +1024,7 @@ function datenSichern(){
       membership: state.membership, household: state.household,
       members: state.members, events: state.events,
       templates: state.templates, reminders: state.reminders,
+      tasks: state.tasks, erledigt: state.erledigt,
       fenster: state.fenster
         ? { von: state.fenster.von.toISOString(), bis: state.fenster.bis.toISOString() }
         : null
@@ -963,6 +1043,8 @@ function datenLaden(){
     state.events     = d.events     || [];
     state.templates  = d.templates  || [];
     state.reminders  = d.reminders  || [];
+    state.tasks      = d.tasks      || [];
+    state.erledigt   = d.erledigt   || [];
     state.fenster    = d.fenster ? { von:new Date(d.fenster.von), bis:new Date(d.fenster.bis) } : null;
     state.stand      = d.stand || null;
     return true;
@@ -1171,9 +1253,14 @@ function render(){
 
   app.innerHTML =
     '<div class="shell">' + topbar() + '<div class="main">' +
-      '<div class="content">' + (state.view==="monat" ? monatsAnsicht() : state.view==="woche" ? wochenAnsicht() : tagesAnsicht()) + '</div>' +
+      '<div class="content">' +
+        (state.view==="monat" ? monatsAnsicht()
+          : state.view==="woche" ? wochenAnsicht()
+          : state.view==="aufgaben" ? aufgabenAnsicht()
+          : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div></div>' +
+    (state.aufgabe ? dialogAufgabe() : "") +
     (state.suche ? dialogSuche() : "") +
     (state.tagDetail ? dialogTag() : "") +
     (state.vorlagenListe ? dialogVorlagen() : "") +
@@ -1255,6 +1342,7 @@ function topbar(){
     label = mo.getDate() + ". " + MONATE[mo.getMonth()].slice(0,3) + " – " + so.getDate() + ". " + MONATE[so.getMonth()].slice(0,3);
   }
   else label = WDLANG[(c.getDay()+6)%7] + ", " + c.getDate() + ". " + MONATE[c.getMonth()];
+  if(state.view === "aufgaben" && sameDay(c, new Date())) label = "Heute";
 
   const chips = state.members.map(m =>
     '<button class="fchip" data-act="filter" data-id="' + m.id + '" aria-pressed="' + (!state.hidden.has(m.id)) + '" style="--c:' + esc(m.farbe) + '">' +
@@ -1265,6 +1353,7 @@ function topbar(){
       '<button data-act="view" data-v="monat" aria-pressed="' + (state.view==="monat") + '">Monat</button>' +
       '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
       '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
+      '<button data-act="view" data-v="aufgaben" aria-pressed="' + (state.view==="aufgaben") + '">Aufgaben</button>' +
     '</div>' +
     '<div class="datenav">' +
       '<button class="btn icon ghost" data-act="prev" aria-label="zurück">‹</button>' +
@@ -1373,6 +1462,46 @@ function tagesAnsicht(){
   '</div>';
 }
 
+function aufgabeZeile(a, tag, klein){
+  const fertig = abgehakt(a, tag);
+  const wer = (a.member_ids || []).map(memberById).filter(Boolean);
+  return '<div class="aufgabe' + (fertig ? " fertig" : "") + '" style="' + farbenOf(a) + '">' +
+    '<button class="aufgabe-haken" data-act="haken" data-id="' + a.id + '" data-tag="' + ymd(tag) + '" aria-pressed="' + fertig + '">' +
+      '<span class="kasten" aria-hidden="true">' + (fertig ? "&#10003;" : "") + '</span>' +
+      '<span class="wort">' +
+        '<span class="titel">' + esc(a.titel) + '</span>' +
+        (klein ? "" : '<span class="meta">' + esc(rhythmusText(a)) +
+          (wer.length ? " \u00b7 " + esc(wer.map(m => m.name).join(", ")) : "") + '</span>') +
+      '</span>' +
+    '</button>' +
+    (klein ? "" : '<button class="btn icon ghost" data-act="aufgabe-oeffnen" data-id="' + a.id + '" aria-label="bearbeiten">&#9998;</button>') +
+  '</div>';
+}
+
+function aufgabenAnsicht(){
+  const tag = state.cursor;
+  const liste = aufgabenAn(tag);
+  const offen  = liste.filter(a => !abgehakt(a, tag));
+  const fertig = liste.filter(a =>  abgehakt(a, tag));
+  const alt = sameDay(tag, new Date()) ? ueberfaellig() : [];
+
+  return '<div class="agenda" style="max-width:640px">' +
+    (alt.length
+      ? '<div class="field"><label>Überfällig</label>' +
+          alt.map(a => aufgabeZeile(a, parseYmd(a.faellig_am), false)).join("") + '</div>'
+      : "") +
+    '<div class="field"><label>' + (offen.length ? "Offen" : "Nichts offen") + '</label>' +
+      (offen.length
+        ? offen.map(a => aufgabeZeile(a, tag, false)).join("")
+        : '<p class="empty">An diesem Tag ist nichts zu tun.</p>') +
+    '</div>' +
+    (fertig.length
+      ? '<div class="field"><label>Erledigt</label>' + fertig.map(a => aufgabeZeile(a, tag, false)).join("") + '</div>'
+      : "") +
+    '<button class="btn" data-act="aufgabe-neu" style="align-self:flex-start;margin-top:6px">+ Aufgabe</button>' +
+  '</div>';
+}
+
 function rail(){
   const heute = new Date(), morgen = addDays(heute,1);
   const blk = (titel, tag) => {
@@ -1385,8 +1514,13 @@ function rail(){
         : '<span class="hint">Nichts eingetragen.</span>') +
     '</div>';
   };
+  const offeneAufgaben = aufgabenAn(heute).filter(a => !abgehakt(a, heute));
   return '<aside class="rail">' +
     blk("Heute · " + heute.getDate() + ". " + MONATE[heute.getMonth()], heute) +
+    (offeneAufgaben.length
+      ? '<div class="railsec"><h2>Aufgaben heute</h2>' +
+          offeneAufgaben.map(a => aufgabeZeile(a, heute, true)).join("") + '</div>'
+      : "") +
     blk("Morgen · " + morgen.getDate() + ". " + MONATE[morgen.getMonth()], morgen) +
   '</aside>';
 }
@@ -1672,6 +1806,55 @@ function sichtbareVorlagen(){
   });
 }
 
+function neueAufgabe(a){
+  if(a) return {
+    id:a.id, titel:a.titel, notiz:a.notiz || "",
+    member_ids:(a.member_ids || []).slice(),
+    wochentage:(a.wochentage || []).slice(),
+    faellig_am: a.faellig_am || ymd(state.cursor), error:null
+  };
+  return { id:null, titel:"", notiz:"", member_ids:[], wochentage:[], faellig_am: ymd(state.cursor), error:null };
+}
+function aufgabeLesen(){
+  const a = state.aufgabe; if(!a) return;
+  const t = $("#auf-titel"); if(t) a.titel = t.value;
+  const n = $("#auf-notiz"); if(n) a.notiz = n.value;
+  const d = $("#auf-datum"); if(d) a.faellig_am = d.value;
+}
+
+function dialogAufgabe(){
+  const a = state.aufgabe;
+  const wd = [1,2,3,4,5,6,0];   // Mo … So
+  return '<div class="backdrop" data-act="backdrop"><form class="modal" data-act="aufgabe-speichern">' +
+    '<h2>' + (a.id ? "Aufgabe bearbeiten" : "Neue Aufgabe") + '</h2>' +
+    (a.error ? '<div class="err">' + esc(a.error) + '</div>' : "") +
+    '<div class="field"><label for="auf-titel">Was ist zu tun</label>' +
+      '<input id="auf-titel" type="text" value="' + esc(a.titel) + '" placeholder="Müll rausbringen" required></div>' +
+    '<div class="field"><label>Für wen</label><div class="whopick">' +
+      personen().map(m =>
+        '<button type="button" data-act="aufgabe-wer" data-id="' + m.id + '" aria-pressed="' + (a.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+          '<span class="dot"></span>' + esc(m.name) + '</button>').join("") +
+      '</div><span class="hint">Nichts ausgewählt heißt: betrifft alle.</span></div>' +
+    '<div class="field"><label>An welchen Tagen</label><div class="whopick">' +
+      wd.map(n =>
+        '<button type="button" data-act="aufgabe-wd" data-n="' + n + '" aria-pressed="' + (a.wochentage.indexOf(n) >= 0) + '" style="--c:var(--accent)">' +
+          WD_KURZ[n] + '</button>').join("") +
+      '<button type="button" data-act="aufgabe-taeglich" style="--c:var(--accent)">täglich</button>' +
+      '</div>' +
+      '<span class="hint">Kein Tag ausgewählt: die Aufgabe ist einmalig.</span></div>' +
+    (a.wochentage.length ? "" :
+      '<div class="field"><label for="auf-datum">Einmalig am</label>' +
+        '<input id="auf-datum" type="date" value="' + esc(a.faellig_am) + '"></div>') +
+    '<div class="field"><label for="auf-notiz">Notiz</label><textarea id="auf-notiz">' + esc(a.notiz) + '</textarea></div>' +
+    '<div class="actions">' +
+      (a.id ? '<button class="btn danger" type="button" data-act="aufgabe-loeschen">Löschen</button>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
 function dialogSuche(){
   const su = state.suche;
   const zeile = (t) => {
@@ -1821,7 +2004,7 @@ function overlayChronikLoesen(){
 }
 function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
-            state.tagDetail || state.vorlagenListe || state.suche);
+            state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -1833,6 +2016,7 @@ function obersteSchliessen(){
   if(state.frage)              return frageAntwort(null);
   else if(state.importer)      state.importer = null;
   else if(state.dialog)        state.dialog = null;
+  else if(state.aufgabe)       state.aufgabe = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
   else if(state.suche)         state.suche = null;
@@ -1843,7 +2027,7 @@ function obersteSchliessen(){
 function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
-  state.tagDetail = null; state.vorlagenListe = false; state.suche = null;
+  state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
   overlayChronikLoesen();
   render();
 }
@@ -1853,7 +2037,7 @@ window.addEventListener("popstate", function(){
   if(overlayOffen()){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
-    state.tagDetail = null; state.vorlagenListe = false; state.suche = null;
+    state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
     render();
   }
 });
@@ -1972,6 +2156,32 @@ async function aktion(act, el){
     case "push-an":   return pushEinschalten();
     case "push-aus":  return pushAusschalten();
     case "push-test": return pushTest();
+    case "aufgabe-neu":
+      state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render();
+    case "aufgabe-oeffnen": {
+      const a = state.tasks.find(x => x.id === el.dataset.id);
+      if(a){ state.aufgabe = neueAufgabe(a); overlayOeffnen(); }
+      return render();
+    }
+    case "aufgabe-wer": {
+      aufgabeLesen();
+      const ids = state.aufgabe.member_ids, i = ids.indexOf(el.dataset.id);
+      if(i >= 0) ids.splice(i,1); else ids.push(el.dataset.id);
+      return render();
+    }
+    case "aufgabe-wd": {
+      aufgabeLesen();
+      const n = parseInt(el.dataset.n, 10);
+      const w = state.aufgabe.wochentage, i = w.indexOf(n);
+      if(i >= 0) w.splice(i,1); else w.push(n);
+      return render();
+    }
+    case "aufgabe-taeglich":
+      aufgabeLesen();
+      state.aufgabe.wochentage = state.aufgabe.wochentage.length === 7 ? [] : [0,1,2,3,4,5,6];
+      return render();
+    case "aufgabe-loeschen": return aufgabeLoeschen();
+    case "haken": return hakenUmschalten(el.dataset.id, el.dataset.tag);
     case "suche-oeffnen":
       state.suche = { text:"", treffer:null, laeuft:false };
       overlayOeffnen(); render();
@@ -2010,6 +2220,7 @@ document.addEventListener("submit", async function(e){
   e.preventDefault();
   const act = form.dataset.act;
   try{
+    if(act === "aufgabe-speichern") return await aufgabeSpeichern();
     if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
     if(act === "speichern")         return await terminSpeichern();
@@ -2369,6 +2580,82 @@ async function vorlageEntfernen(id){
 
 // Wie viele Termine es insgesamt gibt, weiß nur die Datenbank — geladen
 // ist immer nur ein Zeitraum.
+// Der Haken schaltet sofort um, damit es sich am Wandtablet flüssig
+// anfühlt; erst danach geht er an die Datenbank.
+async function hakenUmschalten(id, tagStr){
+  if(!state.tasks.some(x => x.id === id)) return;
+  const vorhanden = state.erledigt.find(h => h.task_id === id && h.tag === tagStr);
+  state.erledigt = vorhanden
+    ? state.erledigt.filter(h => h !== vorhanden)
+    : state.erledigt.concat([{ task_id:id, tag:tagStr, household_id:state.membership.household_id }]);
+  render();
+  try{
+    const r = vorhanden
+      ? await sb.from("task_completions").delete().eq("task_id", id).eq("tag", tagStr)
+      : await sb.from("task_completions").upsert({
+          task_id:id, tag:tagStr,
+          household_id: state.membership.household_id,
+          erledigt_von: state.session.user.id
+        }, { onConflict:"task_id,tag" });
+    if(r.error) throw r.error;
+    datenSichern();
+  }catch(err){
+    await aufgabenLaden();          // Stand aus der Datenbank wiederherstellen
+    setToast(fehlerText(err));
+    render();
+  }
+}
+
+async function aufgabeSpeichern(){
+  aufgabeLesen();
+  const a = state.aufgabe;
+  if(!a.titel.trim()){ a.error = "Bitte eintragen, was zu tun ist."; return render(); }
+  const daten = {
+    household_id: state.membership.household_id,
+    titel: a.titel.trim(),
+    notiz: a.notiz.trim(),
+    member_ids: a.member_ids,
+    wochentage: a.wochentage.slice().sort(),
+    faellig_am: a.wochentage.length ? null : (a.faellig_am || ymd(new Date()))
+  };
+  state.busy = true; render();
+  try{
+    let r;
+    if(a.id){
+      r = await sb.from("tasks").update(daten).eq("id", a.id);
+    }else{
+      daten.sortierung = state.tasks.length;
+      r = await sb.from("tasks").insert(daten);
+    }
+    if(r.error) throw r.error;
+    state.aufgabe = null;
+    chronikPruefen();
+    await aufgabenLaden();
+    datenSichern();
+    setToast(a.id ? "Aufgabe gespeichert" : "Aufgabe angelegt");
+  }catch(err){
+    if(state.aufgabe) state.aufgabe.error = fehlerText(err);
+  }
+  state.busy = false; render();
+}
+
+async function aufgabeLoeschen(){
+  const a = state.aufgabe;
+  if(!a || !a.id) return;
+  if(!(await frage({ titel:"Aufgabe löschen?", text:a.titel, knopf:"Löschen", gefahr:true }))) return;
+  state.busy = true; render();
+  try{
+    const r = await sb.from("tasks").delete().eq("id", a.id);
+    if(r.error) throw r.error;
+    state.aufgabe = null;
+    chronikPruefen();
+    await aufgabenLaden();
+    datenSichern();
+    setToast("Aufgabe gelöscht");
+  }catch(err){ setToast(fehlerText(err)); }
+  state.busy = false; render();
+}
+
 async function zaehlerLaden(){
   try{
     const hid = state.membership.household_id;
@@ -2528,6 +2815,7 @@ async function neuLaden(){
   if(tpl.data) state.templates = tpl.data;
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   if(rem.data) state.reminders = rem.data;
+  await aufgabenLaden();
   datenSichern();
 }
 
