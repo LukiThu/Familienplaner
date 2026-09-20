@@ -209,6 +209,11 @@ button.pill:hover{filter:brightness(1.08)}
 .railitem .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- Dialog ---------- */
+.offline-chip{
+  display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;
+  border-radius:999px;background:var(--warn-bg,var(--surface-2));color:var(--danger);
+  font-size:13px;font-weight:600;white-space:nowrap;
+}
 .modal.schmal{max-width:420px}
 .segment{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px}
 .segment button{
@@ -288,6 +293,8 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .topbar .viewtabs{order:1}
   .topbar .spacer{order:2}
   .topbar [data-act="neu"]{order:3}
+  .topbar .offline-chip{order:3}
+  .topbar .offline-chip .lbl{display:none}
   .topbar [data-act="suche-oeffnen"]{order:4}
   .topbar [data-act="einstellungen"]{order:5}
   .topbar [data-act="neu"] .lbl{display:none}
@@ -392,6 +399,7 @@ const state = {
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
   dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false,
   frage:null, ladefehler:null, tablet: localStorage.getItem("fp.tablet") === "1",
+  offline: (typeof navigator !== "undefined" && navigator.onLine === false), stand:null,
   authError:null, busy:false, toast:null
 };
 let channel = null, toastTimer = null;
@@ -502,6 +510,8 @@ function refreshQuiet(){
       ]);
       if(!mem.error) state.members = mem.data || [];
       state.events = ev;
+      state.offline = false;
+      datenSichern();
       if(!tpl.error) state.templates = tpl.data || [];
       render();
     }catch(e){ /* stiller Abgleich — Fehler beim nächsten Versuch */ }
@@ -913,6 +923,66 @@ function importVorbereiten(){
 }
 
 /* =========================================================
+   Offline lesen: letzten Stand im Gerät behalten
+   ========================================================= */
+
+function datenSchluessel(){
+  return "fp.daten." + (state.session ? state.session.user.id : "?");
+}
+function datenSichern(){
+  if(!state.membership) return;
+  state.stand = new Date().toISOString();
+  try{
+    localStorage.setItem(datenSchluessel(), JSON.stringify({
+      stand: state.stand,
+      membership: state.membership, household: state.household,
+      members: state.members, events: state.events,
+      templates: state.templates, reminders: state.reminders,
+      fenster: state.fenster
+        ? { von: state.fenster.von.toISOString(), bis: state.fenster.bis.toISOString() }
+        : null
+    }));
+  }catch(e){ /* Speicher voll: dann eben ohne Zwischenstand */ }
+}
+function datenLaden(){
+  try{
+    const roh = localStorage.getItem(datenSchluessel());
+    if(!roh) return false;
+    const d = JSON.parse(roh);
+    if(!d || !d.membership) return false;
+    state.membership = d.membership;
+    state.household  = d.household  || null;
+    state.members    = d.members    || [];
+    state.events     = d.events     || [];
+    state.templates  = d.templates  || [];
+    state.reminders  = d.reminders  || [];
+    state.fenster    = d.fenster ? { von:new Date(d.fenster.von), bis:new Date(d.fenster.bis) } : null;
+    state.stand      = d.stand || null;
+    return true;
+  }catch(e){ return false; }
+}
+function datenVerwerfen(){
+  try{ localStorage.removeItem(datenSchluessel()); }catch(e){}
+}
+
+function standText(){
+  if(!state.stand) return "";
+  const d = new Date(state.stand);
+  return sameDay(d, new Date())
+    ? "Stand " + hm(d)
+    : "Stand " + d.getDate() + "." + (d.getMonth()+1) + "., " + hm(d);
+}
+// Netzfehler kenntlich machen, statt eine englische Meldung durchzureichen.
+function fehlerText(err){
+  const m = (err && err.message) ? err.message : String(err);
+  if(/Failed to fetch|NetworkError|Load failed|ERR_INTERNET|network/i.test(m)){
+    state.offline = true;
+    return "Keine Verbindung — die Änderung wurde nicht gespeichert.";
+  }
+  return m;
+}
+
+/* =========================================================
    Eigene Rückfragen statt der Browser-Dialoge
    ========================================================= */
 
@@ -1198,6 +1268,10 @@ function topbar(){
     '<div class="spacer"></div>' +
     '<div class="filters">' + chips + '</div>' +
     '<button class="btn primary" data-act="neu" aria-label="Termin anlegen">+<span class="lbl">&nbsp;Termin</span></button>' +
+    (state.offline
+      ? '<span class="offline-chip" title="' + esc(standText() || "kein Stand gespeichert") + '">' +
+          'Offline' + (state.stand ? '<span class="lbl"> · ' + esc(standText()) + '</span>' : "") + '</span>'
+      : "") +
     '<button class="btn icon ghost" data-act="suche-oeffnen" aria-label="Suchen">' +
       '<svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">' +
         '<circle cx="9" cy="9" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"></circle>' +
@@ -1790,7 +1864,8 @@ document.addEventListener("click", async function(e){
     return await aktion(act, el);
   }catch(err){
     state.busy = false;
-    setToast("Fehler: " + (err && err.message ? err.message : err));
+    setToast(fehlerText(err));
+    render();
   }
 });
 
@@ -1898,6 +1973,7 @@ async function aktion(act, el){
     case "einst-speichern": return einstellungenSpeichern();
     case "logout":
       if(channel){ sb.removeChannel(channel); channel=null; }
+      datenVerwerfen();
       await sb.auth.signOut();
       state.session=null; state.membership=null; state.settings=false;
       overlayChronikLoesen();
@@ -2417,6 +2493,7 @@ async function neuLaden(){
   if(tpl.data) state.templates = tpl.data;
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   if(rem.data) state.reminders = rem.data;
+  datenSichern();
 }
 
 /* =========================================================
@@ -2433,8 +2510,14 @@ async function ladenMitWiederholung(neuZeichnen){
   try{
     await loadAll();
     state.ladefehler = null;
+    state.offline = false;
+    datenSichern();
   }catch(err){
     state.ladefehler = (err && err.message) ? err.message : String(err);
+    state.offline = true;
+    // Kein Zugriff, aber ein gespeicherter Stand? Dann den zeigen, statt
+    // eine Fehlerseite — genau dafür liegt er im Gerät.
+    if(!state.membership) datenLaden();
     ladeTimer = setTimeout(function(){ ladenMitWiederholung(true); }, 15000);
   }
   state.busy = false;
@@ -2445,9 +2528,14 @@ async function start(){
   if(!sb){ render(); return; }
   const { data } = await sb.auth.getSession();
   state.session = data.session || null;
-  if(state.session) await ladenMitWiederholung(false);
+  if(state.session){
+    // Erst der gespeicherte Stand — dann wird im Hintergrund aufgefrischt.
+    if(datenLaden()){ state.ready = true; render(); }
+    await ladenMitWiederholung(false);
+  }
   state.ready = true; render();
   zeitgeberStarten();
+  dienstRegistrieren();
   pushPruefen().then(render).catch(() => {});
 
   sb.auth.onAuthStateChange(async (_evt, session)=>{
@@ -2463,6 +2551,20 @@ async function start(){
   document.addEventListener("visibilitychange", ()=>{
     if(!document.hidden && state.membership) refreshQuiet();
   });
+
+  window.addEventListener("offline", function(){ state.offline = true; render(); });
+  window.addEventListener("online", function(){
+    state.offline = false;
+    if(state.membership) refreshQuiet(); else ladenMitWiederholung(true);
+    render();
+  });
+}
+
+// Der Hintergrunddienst hält die App offline verfügbar — unabhängig davon,
+// ob dieses Gerät Erinnerungen bekommt.
+function dienstRegistrieren(){
+  if(!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("sw.js").catch(function(){});
 }
 
 /* ---------------------------------------------------------
