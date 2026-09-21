@@ -405,6 +405,10 @@ button.pill:hover{filter:brightness(1.08)}
 .sb-termin .t{flex:none;min-width:70px;font-size:20px;font-weight:600;color:#A9B3AA;font-variant-numeric:tabular-nums}
 .sb-termin .n{font-size:22px;font-weight:600}
 .sb-essen{margin-top:22px;font-size:20px;color:#A9B3AA}
+.aufpill{border-left:3px solid var(--c-bg,var(--line-strong));background:var(--surface-2);color:var(--text)}
+.aufpill.fertig{opacity:.55;text-decoration:line-through}
+.dayhead .aufzahl{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted)}
+.day.allesfertig .aufzahl{color:var(--accent)}
 .zutatzeile{
   display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin-bottom:8px;
   border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
@@ -614,7 +618,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 21:03";
+const FASSUNG = "2026-09-21 21:10";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1307,7 +1311,7 @@ function istRoutine(a){ return (a.wochentage || []).length > 0; }
 
 // Fällig an diesem Tag? Routinen an ihren Wochentagen, einmalige am Datum.
 function aufgabeFaellig(a, tag){
-  if(istRoutine(a)) return a.wochentage.indexOf(tag.getDay()) >= 0;
+  if(istRoutine(a)) return a.wochentage.indexOf(tag.getDay()) >= 0 && (a.ausnahmen || []).indexOf(ymd(tag)) < 0;
   return !!a.faellig_am && a.faellig_am === ymd(tag);
 }
 function abgehakt(a, tag){
@@ -1692,6 +1696,7 @@ function render(){
         (state.view==="monat" ? monatsAnsicht()
           : state.view==="woche" ? wochenAnsicht()
           : state.view==="aufgaben" ? aufgabenAnsicht()
+          : state.view==="aufgabenmonat" ? aufgabenMonatsAnsicht()
           : state.view==="listen" ? listenAnsicht()
           : state.view==="lager" ? lagerAnsicht()
           : state.view==="gerichte" ? gerichteAnsicht()
@@ -1834,6 +1839,7 @@ document.addEventListener("webkitfullscreenchange", function(){ renderImHintergr
 // gehören nur zum Kalender.
 function bereichVon(view){
   if(["lager","gerichte","zutaten","essen"].indexOf(view) >= 0) return "kueche";
+  if(view === "aufgabenmonat") return "aufgaben";
   return view === "aufgaben" || view === "listen" ? view : "kalender";
 }
 
@@ -1849,7 +1855,7 @@ function topbar(){
   // Am Handy teilen sich Datum und Knöpfe eine Zeile — dort kurz.
   const eng = window.innerWidth < 641;
   let label;
-  if(state.view === "monat"){
+  if(state.view === "monat" || state.view === "aufgabenmonat"){
     label = (eng ? MONATE[c.getMonth()].slice(0,3) : MONATE[c.getMonth()]) + " " + c.getFullYear();
   }else if(state.view === "woche"){
     const mo = mondayOf(c), so = addDays(mo,6);
@@ -1890,6 +1896,12 @@ function topbar(){
             '<button data-act="view" data-v="monat" aria-pressed="' + (state.view==="monat") + '">Monat</button>' +
             '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
             '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
+          '</div>'
+        : "") +
+      (bereich === "aufgaben"
+        ? '<div class="viewtabs">' +
+            '<button data-act="view" data-v="aufgaben" aria-pressed="' + (state.view==="aufgaben") + '">Tag</button>' +
+            '<button data-act="view" data-v="aufgabenmonat" aria-pressed="' + (state.view==="aufgabenmonat") + '">Monat</button>' +
           '</div>'
         : "") +
       (bereich === "kueche"
@@ -2044,8 +2056,35 @@ function aufgabeZeile(a, tag, klein){
           (wer.length ? " \u00b7 " + esc(wer.map(m => m.name).join(", ")) : "") + '</span>') +
       '</span>' +
     '</button>' +
-    (klein ? "" : '<button class="btn icon ghost" data-act="aufgabe-oeffnen" data-id="' + a.id + '" aria-label="bearbeiten">' + ICON.stift(18) + '</button>') +
+    (klein ? "" : '<button class="btn icon ghost" data-act="aufgabe-oeffnen" data-id="' + a.id + '" data-tag="' + ymd(tag) + '" aria-label="bearbeiten">' + ICON.stift(18) + '</button>') +
   '</div>';
+}
+
+// Monat der Aufgaben: je Tag, was fällig ist; Erledigtes durchgestrichen.
+// Antippen öffnet den Tag.
+function aufgabenMonatsAnsicht(){
+  const c = state.cursor;
+  const start = mondayOf(new Date(c.getFullYear(), c.getMonth(), 1));
+  const heute = new Date();
+  const maxProTag = window.innerWidth < 641 ? 4 : 3;
+  let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
+  for(let i = 0; i < 42; i++){
+    const d = addDays(start, i);
+    const liste = aufgabenAn(d);
+    const offen = liste.filter(a => !abgehakt(a, d)), fertig = liste.filter(a => abgehakt(a, d));
+    const alle = offen.concat(fertig), zeigen = alle.slice(0, maxProTag), rest = alle.length - zeigen.length;
+    html += '<button class="day' + (d.getMonth() !== c.getMonth() ? " other" : "") + (sameDay(d, heute) ? " today" : "") +
+        ((d.getDay()===0 || d.getDay()===6) ? " weekend" : "") + (liste.length && !offen.length ? " allesfertig" : "") + '"' +
+        ' data-act="aufgaben-tag" data-d="' + ymd(d) + '">' +
+      '<span class="dayhead"><span class="daynum">' + d.getDate() + '</span>' +
+        (liste.length ? '<span class="aufzahl">' + fertig.length + '/' + liste.length + '</span>' : "") + '</span>' +
+      '<span class="daylist">' + zeigen.map(a =>
+        '<span class="pill aufpill' + (abgehakt(a, d) ? " fertig" : "") + '" style="' + farbenOf(a) + '">' +
+          '<span class="n">' + esc(a.titel) + '</span></span>').join("") +
+        (rest > 0 ? '<span class="more">+' + rest + '<span class="lbl"> weitere</span></span>' : "") +
+      '</span></button>';
+  }
+  return html + '</div>';
 }
 
 function aufgabenAnsicht(){
@@ -2851,8 +2890,13 @@ function dialogAufgabe(){
       '<div class="field"><label for="auf-datum">Einmalig am</label>' +
         '<input id="auf-datum" type="date" value="' + esc(a.faellig_am) + '"></div>') +
     '<div class="field"><label for="auf-notiz">Notiz</label><textarea id="auf-notiz">' + esc(a.notiz) + '</textarea></div>' +
+    // Routine, aus einem bestimmten Tag geöffnet: nur diesen Tag auslassen.
+    (a.id && a.tag && a.wochentage.length
+      ? '<button class="btn" type="button" data-act="aufgabe-auslassen" style="align-self:flex-start">Nur am ' +
+          esc(tagKurz(parseYmd(a.tag))) + ' entfernen</button>'
+      : "") +
     '<div class="actions">' +
-      (a.id ? '<button class="btn danger" type="button" data-act="aufgabe-loeschen">Löschen</button>' : "") +
+      (a.id ? '<button class="btn danger" type="button" data-act="aufgabe-loeschen">' + (a.wochentage.length ? "Ganze Aufgabe löschen" : "Löschen") + '</button>' : "") +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
@@ -3396,12 +3440,13 @@ async function aktion(act, el){
       state.view = el.dataset.v; localStorage.setItem("fp.view", state.view);
       if(["monat","woche","tag"].indexOf(state.view) >= 0) localStorage.setItem("fp.kalenderView", state.view);
       if(["lager","gerichte","zutaten","essen"].indexOf(state.view) >= 0) localStorage.setItem("fp.kuecheView", state.view);
+      if(["aufgaben","aufgabenmonat"].indexOf(state.view) >= 0) localStorage.setItem("fp.aufgabenView", state.view);
       state.kuecheSuche = "";
       return render();
     case "prev":
     case "next": {
       const n = act === "prev" ? -1 : 1;
-      state.cursor = state.view === "monat" ? addMonths(state.cursor, n)
+      state.cursor = state.view === "monat" || state.view === "aufgabenmonat" ? addMonths(state.cursor, n)
                    : state.view === "woche" ? addDays(state.cursor, 7*n)
                    : addDays(state.cursor, n);
       render();
@@ -3437,6 +3482,8 @@ async function aktion(act, el){
       if(b === "kalender"){
         state.view = state.tablet ? "tafel" : (localStorage.getItem("fp.kalenderView") || "monat");
         if(["monat","woche","tag","tafel"].indexOf(state.view) < 0) state.view = "monat";
+      }else if(b === "aufgaben"){
+        state.view = localStorage.getItem("fp.aufgabenView") === "aufgabenmonat" ? "aufgabenmonat" : "aufgaben";
       }else if(b === "kueche"){
         const kv = localStorage.getItem("fp.kuecheView");
         state.view = ["gerichte","zutaten","essen"].indexOf(kv) >= 0 ? kv : "lager";
@@ -3611,13 +3658,18 @@ async function aktion(act, el){
       if(liste){ liste.insertAdjacentHTML("beforeend", bereichZeile("", "")); const f = liste.lastElementChild.querySelector("input"); if(f) f.focus(); }
       return;
     }
+    case "aufgaben-tag":
+      state.cursor = parseYmd(el.dataset.d); state.view = "aufgaben";
+      localStorage.setItem("fp.aufgabenView", "aufgaben");
+      return render();
     case "aufgabe-neu":
       state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render();
     case "aufgabe-oeffnen": {
       const a = state.tasks.find(x => x.id === el.dataset.id);
-      if(a){ state.aufgabe = neueAufgabe(a); overlayOeffnen(); }
+      if(a){ state.aufgabe = neueAufgabe(a); state.aufgabe.tag = el.dataset.tag || null; overlayOeffnen(); }
       return render();
     }
+    case "aufgabe-auslassen": return aufgabeAuslassen();
     case "aufgabe-wer": {
       aufgabeLesen();
       const ids = state.aufgabe.member_ids, i = ids.indexOf(el.dataset.id);
@@ -4136,6 +4188,23 @@ async function aufgabeSpeichern(){
     if(state.aufgabe) state.aufgabe.error = fehlerText(err);
   }
   state.busy = false; render();
+}
+
+// Einen Tag einer Routine streichen — die Routine selbst bleibt.
+async function aufgabeAuslassen(){
+  const d = state.aufgabe; if(!d || !d.id || !d.tag) return;
+  const a = state.tasks.find(x => x.id === d.id); if(!a) return;
+  const ausnahmen = (a.ausnahmen || []).filter(t => t !== d.tag).concat([d.tag]).sort();
+  state.aufgabe = null; chronikPruefen();
+  state.tasks = state.tasks.map(x => x.id === a.id ? Object.assign({}, x, { ausnahmen:ausnahmen }) : x);
+  render();
+  try{
+    const r = await sb.from("tasks").update({ ausnahmen:ausnahmen }).eq("id", a.id);
+    if(r.error) throw r.error;
+    datenSichern();
+    setToast("„" + a.titel + "“ am " + tagKurz(parseYmd(d.tag)) + " entfernt");
+  }catch(err){ await aufgabenLaden(); setToast(fehlerText(err)); }
+  render();
 }
 
 async function aufgabeLoeschen(){
