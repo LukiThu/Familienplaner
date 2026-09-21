@@ -346,6 +346,13 @@ button.pill:hover{filter:brightness(1.08)}
 .bedarf span{display:flex;flex-direction:column;gap:1px}
 .bedarf small{font-size:12.5px;color:var(--muted)}
 .bedarf.drauf{opacity:.6}
+.gericht .seit{font-size:12.5px;color:var(--muted)}
+.gericht .marke.idee{background:var(--today);color:var(--text)}
+.wurf{display:flex;flex-direction:column;gap:3px;padding:14px;border-radius:var(--radius);background:var(--accent-soft)}
+.wurf b{font-size:20px;letter-spacing:-.015em}
+.wurf small{font-size:13px;color:var(--muted)}
+.wurf .fehlt{color:var(--danger);font-weight:600}
+.wurf .da{color:var(--accent);font-weight:600}
 .zutatzeile{
   display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin-bottom:8px;
   border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
@@ -384,6 +391,9 @@ button.pill:hover{filter:brightness(1.08)}
 .gericht .fehlt{font-size:13px;font-weight:600;color:var(--danger)}
 .gericht .knapp{font-size:13px;color:var(--knapp)}
 @media (max-width:640px){
+  .kuechenleiste.wischbar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -10px;padding:0 10px}
+  .kuechenleiste.wischbar::-webkit-scrollbar{display:none}
+  .kuechenleiste.wischbar > *{flex:none;white-space:nowrap}
   .ampel button{min-width:44px;font-size:12px}
   .gerichte{grid-template-columns:1fr}
 }
@@ -552,7 +562,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 20:31";
+const FASSUNG = "2026-09-21 20:42";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -624,7 +634,7 @@ const state = {
   filterOffen:false,
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
   zutatFilter:"", zutatDialog:null,
-  plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false,
+  plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -1646,6 +1656,7 @@ function render(){
     (state.planDialog ? dialogPlan() : "") +
     (state.heuteKochen ? dialogHeuteKochen() : "") +
     (state.wochenEinkauf ? dialogWochenEinkauf() : "") +
+    (state.wuerfel ? dialogWuerfel() : "") +
     (state.suche ? dialogSuche() : "") +
     (state.tagDetail ? dialogTag() : "") +
     (state.vorlagenListe ? dialogVorlagen() : "") +
@@ -2136,7 +2147,7 @@ function lagerAnsicht(){
 }
 
 /* ---------- Küche: Gerichte ---------- */
-const GERICHT_FILTER = [["haus","Alles im Haus"],["veg","Vegetarisch"],["kinder","Mögen die Kinder"],["schnell","Bis 30 Min."]];
+const GERICHT_FILTER = [["haus","Alles im Haus"],["lange","Lange nicht gegessen"],["idee","Zum Ausprobieren"],["veg","Vegetarisch"],["kinder","Mögen die Kinder"],["schnell","Bis 30 Min."]];
 function gerichtPasst(g){
   const f = state.gerichtFilter;
   const such = suchText(state.kuecheSuche.trim());
@@ -2145,6 +2156,8 @@ function gerichtPasst(g){
   if(f.indexOf("veg") >= 0 && !g.vegetarisch) return false;
   if(f.indexOf("kinder") >= 0 && !g.kinder) return false;
   if(f.indexOf("schnell") >= 0 && !(g.dauer_min && g.dauer_min <= 30)) return false;
+  if(f.indexOf("lange") >= 0 && kuerzlich(g, 21)) return false;
+  if(f.indexOf("idee") >= 0 && !g.idee) return false;
   return true;
 }
 function gerichtKarte(g){
@@ -2152,9 +2165,11 @@ function gerichtKarte(g){
   const marken =
     (g.dauer_min ? '<span class="marke">' + g.dauer_min + ' Min.</span>' : "") +
     (g.vegetarisch ? '<span class="marke gruen">vegetarisch</span>' : "") +
-    (g.kinder ? '<span class="marke gruen">Kinder mögen’s</span>' : "");
+    (g.kinder ? '<span class="marke gruen">Kinder mögen’s</span>' : "") +
+    (g.idee ? '<span class="marke idee">zum Ausprobieren</span>' : "");
   return '<button class="gericht" data-act="gericht-oeffnen" data-id="' + g.id + '">' +
     '<h3>' + esc(g.name) + '</h3>' +
+    '<span class="seit">' + esc(seitText(g)) + '</span>' +
     (marken ? '<span class="marken">' + marken + '</span>' : "") +
     (zutatenVon(g).length ? '<span class="zutaten">' + esc(zutatenVon(g).map(zutatText).join(" · ")) + '</span>' : "") +
     (st.leer.length ? '<span class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</span>' : "") +
@@ -2162,11 +2177,16 @@ function gerichtKarte(g){
   '</button>';
 }
 function gerichteAnsicht(){
-  const zeigen = state.dishes.filter(gerichtPasst).slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+  // „Lange nicht gegessen“: das am längsten Vergessene zuerst, Nie-Gekochtes ganz oben.
+  const lange = state.gerichtFilter.indexOf("lange") >= 0;
+  const alter = g => { const z = zuletztGegessen(g); return z ? tageSeit(z) : 99999; };
+  const zeigen = state.dishes.filter(gerichtPasst).slice()
+    .sort((a, b) => (lange ? alter(b) - alter(a) : 0) || a.name.localeCompare(b.name, "de"));
   const chips = GERICHT_FILTER.map(f =>
     '<button class="fchip" data-act="gericht-filter" data-f="' + f[0] + '" aria-pressed="' + (state.gerichtFilter.indexOf(f[0]) >= 0) + '">' + f[1] + '</button>').join("");
   return '<div class="agenda" style="max-width:980px">' +
-    '<div class="kuechenleiste">' + chips + '</div>' +
+    '<div class="kuechenleiste wischbar">' +
+      (state.dishes.length ? '<button class="btn" data-act="wuerfeln">&#127922; Würfeln</button>' : "") + chips + '</div>' +
     (state.dishes.length > 6 ? kuecheSuchfeld("Gericht oder Zutat suchen") : "") +
     (!state.dishes.length
       ? '<p class="empty">Noch keine Gerichte. Mit + legt ihr eure Sammlung an — die Zutaten eine pro Zeile.</p>'
@@ -2237,6 +2257,56 @@ function zutatenAnsicht(){
 }
 
 /* ---------- Küche: Wochenplan ---------- */
+// Wann gab es das Gericht zuletzt, wann ist es wieder geplant?
+function zuletztGegessen(g){
+  const heute = ymd(new Date());
+  let t = null;
+  state.plan.forEach(e => { if(e.gericht_id === g.id && e.tag <= heute && (!t || e.tag > t)) t = e.tag; });
+  return t ? parseYmd(t) : null;
+}
+function naechstGeplant(g){
+  const heute = ymd(new Date());
+  let t = null;
+  state.plan.forEach(e => { if(e.gericht_id === g.id && e.tag > heute && (!t || e.tag < t)) t = e.tag; });
+  return t ? parseYmd(t) : null;
+}
+function tageSeit(d){ return Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000); }
+function seitText(g){
+  const n = naechstGeplant(g);
+  if(n) return "geplant " + tagKurz(n);
+  const z = zuletztGegessen(g);
+  if(!z) return "noch nie gekocht";
+  const t = tageSeit(z);
+  if(t === 0) return "heute";
+  if(t === 1) return "gestern";
+  if(t < 14) return "vor " + t + " Tagen";
+  if(t < 63) return "vor " + Math.round(t / 7) + " Wochen";
+  return "vor " + Math.round(t / 30) + " Monaten";
+}
+// Gegessen oder geplant innerhalb von ±tage?
+function kuerzlich(g, tage){
+  const z = zuletztGegessen(g), n = naechstGeplant(g);
+  return (z && tageSeit(z) < tage) || (n && -tageSeit(n) < tage);
+}
+
+// Würfel: bevorzugt, was lange nicht dran war, was ganz im Haus ist und
+// was auf der Merkliste steht. Was in den letzten/nächsten 7 Tagen dran
+// ist, fällt raus — außer es bleibt sonst nichts übrig.
+function wuerfeln(ohne){
+  let pool = state.dishes.filter(g => g.id !== ohne && !kuerzlich(g, 7));
+  if(!pool.length) pool = state.dishes.filter(g => g.id !== ohne);
+  if(!pool.length) pool = state.dishes.slice();
+  if(!pool.length) return null;
+  const gewicht = g => {
+    const z = zuletztGegessen(g);
+    return (z ? Math.min(tageSeit(z), 60) : 40) + 5 + (imHaus(g) ? 15 : 0) + (g.idee ? 15 : 0);
+  };
+  const summe = pool.reduce((a, g) => a + gewicht(g), 0);
+  let r = Math.random() * summe;
+  for(const g of pool){ r -= gewicht(g); if(r < 0) return g; }
+  return pool[pool.length - 1];
+}
+
 function planAm(tag){ const t = ymd(tag); return state.plan.filter(e => e.tag === t); }
 function planGericht(e){ return e.gericht_id ? state.dishes.find(g => g.id === e.gericht_id) || null : null; }
 function planName(e){ const g = planGericht(e); return g ? g.name : (e.text || "?"); }
@@ -2271,6 +2341,7 @@ function essensplanAnsicht(){
   const knoepfe = '<div class="kuechenleiste">' +
     '<button class="btn" data-act="heute-kochen">Was kochen wir heute?</button>' +
     '<button class="btn" data-act="wochen-einkauf">Einkauf für die Woche</button>' +
+    (state.dishes.length ? '<button class="btn" data-act="wuerfeln">&#127922; Würfeln</button>' : "") +
   '</div>';
   const tag = d => {
     const eintraege = planAm(d);
@@ -2705,8 +2776,8 @@ function dialogVorrat(){
 
 function neuesGericht(g){
   return g ? { id:g.id, name:g.name, zutaten:zutatenVon(g), dauer_min: g.dauer_min == null ? "" : String(g.dauer_min),
-               vegetarisch:!!g.vegetarisch, kinder:!!g.kinder, notiz:g.notiz || "" }
-           : { id:null, name:"", zutaten:[], dauer_min:"", vegetarisch:false, kinder:false, notiz:"" };
+               vegetarisch:!!g.vegetarisch, kinder:!!g.kinder, idee:!!g.idee, notiz:g.notiz || "" }
+           : { id:null, name:"", zutaten:[], dauer_min:"", vegetarisch:false, kinder:false, idee:false, notiz:"" };
 }
 function zutatZeile(z){
   return '<div class="zutatrow">' +
@@ -2758,6 +2829,7 @@ function gerichtLesen(){
   if($("#ge-dauer"))   g.dauer_min = $("#ge-dauer").value;
   if($("#ge-veg"))     g.vegetarisch = $("#ge-veg").checked;
   if($("#ge-kinder"))  g.kinder = $("#ge-kinder").checked;
+  if($("#ge-idee"))    g.idee = $("#ge-idee").checked;
   if($("#ge-notiz"))   g.notiz = $("#ge-notiz").value;
 }
 function dialogGericht(){
@@ -2772,6 +2844,7 @@ function dialogGericht(){
     '<div class="field"><label for="ge-dauer">Dauer in Minuten</label><input id="ge-dauer" type="number" min="1" max="600" inputmode="numeric" value="' + esc(g.dauer_min) + '"></div>' +
     '<label class="check"><input id="ge-veg" type="checkbox"' + (g.vegetarisch ? " checked" : "") + '> Vegetarisch</label>' +
     '<label class="check"><input id="ge-kinder" type="checkbox"' + (g.kinder ? " checked" : "") + '> Die Kinder mögen es</label>' +
+    '<label class="check"><input id="ge-idee" type="checkbox"' + (g.idee ? " checked" : "") + '> Zum Ausprobieren (Merkliste)</label>' +
     '<div class="field"><label for="ge-notiz">Notiz</label><textarea id="ge-notiz" placeholder="Rezept-Link, Tipps …">' + esc(g.notiz) + '</textarea></div>' +
     '<div class="actions">' +
       (g.id ? '<button class="btn danger" type="button" data-act="gericht-loeschen">Löschen</button>' : "") +
@@ -2902,6 +2975,31 @@ function dialogWochenEinkauf(){
       (liste.some(b => !b.drauf) ? '<button class="btn primary" type="submit">Auf die Einkaufsliste</button>' : "") +
     '</div>' +
   '</form></div>';
+}
+
+function dialogWuerfel(){
+  const w = state.wuerfel, g = state.dishes.find(x => x.id === w.id);
+  if(!g) return "";
+  const st = zutatenStand(g);
+  const mo = planMontag(), heute = startOfDay(new Date());
+  const tage = [0,1,2,3,4,5,6].map(i => addDays(mo, i)).filter(d => d >= heute);
+  if(!tage.length) tage.push(heute);
+  return '<div class="backdrop" data-act="backdrop"><div class="modal schmal wuerfel">' +
+    '<h2>&#127922; Wie wär’s mit …</h2>' +
+    '<div class="wurf">' +
+      '<b>' + esc(g.name) + '</b>' +
+      '<small>' + esc(seitText(g)) + (g.dauer_min ? " · " + g.dauer_min + " Min." : "") + (g.idee ? " · zum Ausprobieren" : "") + '</small>' +
+      (st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : '<small class="da">Aus dem Lager ist alles da</small>') +
+    '</div>' +
+    '<div class="field"><label for="wuerfel-tag">Einplanen für</label><select id="wuerfel-tag">' +
+      tage.map(d => '<option value="' + ymd(d) + '"' + (ymd(d) === w.tag ? " selected" : "") + '>' + (sameDay(d, heute) ? "Heute" : WDLANG[(d.getDay()+6)%7]) + ", " + d.getDate() + "." + (d.getMonth()+1) + ".</option>").join("") +
+    '</select></div>' +
+    '<div class="actions">' +
+      '<button class="btn" type="button" data-act="wuerfeln" data-ohne="' + g.id + '">Nochmal</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn primary" type="button" data-act="wuerfel-einplanen">Einplanen</button>' +
+    '</div>' +
+  '</div></div>';
 }
 
 function dialogListe(){
@@ -3071,7 +3169,7 @@ function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
             state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe ||
             state.eintrag || state.listeDialog || state.vorrat || state.gericht || state.zutatDialog ||
-            state.planDialog || state.heuteKochen || state.wochenEinkauf);
+            state.planDialog || state.heuteKochen || state.wochenEinkauf || state.wuerfel);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -3091,6 +3189,7 @@ function obersteSchliessen(){
   else if(state.planDialog)    state.planDialog = null;
   else if(state.heuteKochen)   state.heuteKochen = false;
   else if(state.wochenEinkauf) state.wochenEinkauf = null;
+  else if(state.wuerfel)       state.wuerfel = null;
   else if(state.listeDialog)   state.listeDialog = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
@@ -3104,7 +3203,7 @@ function overlaySchliessen(){
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
   state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
-  state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null;
+  state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
   overlayChronikLoesen();
   render();
 }
@@ -3116,7 +3215,7 @@ window.addEventListener("popstate", function(){
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
     state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
-  state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null;
+  state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
     render();
   }
 });
@@ -3329,6 +3428,21 @@ async function aktion(act, el){
     case "heute-kochen": state.heuteKochen = true; overlayOeffnen(); return render();
     case "heute-waehlen": state.heuteKochen = false; chronikPruefen(); return planEintragen(ymd(new Date()), el.dataset.id, "");
     case "wochen-einkauf": state.wochenEinkauf = {}; overlayOeffnen(); return render();
+    case "wuerfeln": {
+      const g = wuerfeln(el.dataset.ohne || null); if(!g) return;
+      // Gewählten Tag beim Nochmal-Würfeln behalten.
+      const sel = $("#wuerfel-tag");
+      const tag = sel ? sel.value : ymd(planStandardTag());
+      if(!state.wuerfel) overlayOeffnen();
+      state.wuerfel = { id:g.id, tag:tag };
+      return render();
+    }
+    case "wuerfel-einplanen": {
+      const w = state.wuerfel; if(!w) return;
+      const sel = $("#wuerfel-tag"), tag = sel ? sel.value : w.tag;
+      state.wuerfel = null; chronikPruefen();
+      return planEintragen(tag, w.id, "");
+    }
     case "zutat-filter": state.zutatFilter = state.zutatFilter === el.dataset.f ? "" : el.dataset.f; return render();
     case "zutat-ins-lager": return zutatInsLager(el.dataset.name);
     case "zutat-oeffnen": {
@@ -4177,7 +4291,7 @@ async function gerichtSpeichern(){
     name:name,
     zutaten: g.zutaten.filter(z => z.name),
     dauer_min: dauer > 0 ? dauer : null,
-    vegetarisch: !!g.vegetarisch, kinder: !!g.kinder, notiz: g.notiz.trim()
+    vegetarisch: !!g.vegetarisch, kinder: !!g.kinder, idee: !!g.idee, notiz: g.notiz.trim()
   };
   try{
     const r = g.id
