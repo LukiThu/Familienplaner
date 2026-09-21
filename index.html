@@ -233,6 +233,15 @@ button.pill:hover{filter:brightness(1.08)}
 .rail .aufgabe{margin-bottom:6px}
 .rail .aufgabe-haken{min-height:44px;padding:7px 8px;gap:9px}
 .rail .kasten{width:21px;height:21px;font-size:13px}
+.listenreiter{display:flex;gap:7px;flex-wrap:wrap}
+.listenkopf{display:flex;align-items:center;gap:8px;margin-top:4px}
+.listenkopf h2{margin:0;font-size:20px;letter-spacing:-.015em}
+.eintrag-form{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.eintrag-form input{flex:1 1 180px;min-width:0}
+.eintrag-form select{flex:0 1 190px;min-width:0}
+.eintrag-form .btn{flex:0 0 auto;min-width:46px;font-size:20px}
+.bereichrow{display:flex;gap:4px;align-items:center;padding:4px 0}
+.bereichrow input{flex:1 1 auto;min-width:0}
 .offline-chip{
   display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;
   border-radius:999px;background:var(--warn-bg,var(--surface-2));color:var(--danger);
@@ -315,17 +324,23 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
 
 /* ---------- Handy ---------- */
 @media (max-width:640px){
-  .topbar{padding:9px 11px;gap:8px 7px}
-  .topbar .viewtabs{order:1}
-  .topbar .spacer{order:2}
-  .topbar [data-act="neu"]{order:3}
-  .topbar .offline-chip{order:3}
+  .topbar{padding:9px 11px;gap:8px 4px}
+  /* Fünf Reiter brauchen am Handy eine eigene Zeile. */
+  .topbar .viewtabs{order:1;width:100%}
+  .topbar .viewtabs button{flex:1 1 0;min-width:0;padding:0 4px;font-size:13px}
+  .topbar .datenav{order:2;flex:1 1 auto;min-width:0;gap:0}
+  /* Datum und drei Knöpfe müssen sich eine Zeile teilen. */
+  .topbar .btn.icon{min-width:38px;padding:0 6px}
+  .topbar .datenav [data-act="heute"]{padding:0 8px}
+  .topbar .datelabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar .spacer{order:3}
+  .topbar .offline-chip{order:4}
   .topbar .offline-chip .lbl{display:none}
-  .topbar [data-act="suche-oeffnen"]{order:4}
-  .topbar [data-act="einstellungen"]{order:5}
+  .topbar [data-act="neu"]{order:5}
   .topbar [data-act="neu"] .lbl{display:none}
-  .topbar .datenav{order:6;width:100%;justify-content:space-between}
-  .topbar .filters{order:7;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .topbar [data-act="suche-oeffnen"]{order:6}
+  .topbar [data-act="einstellungen"]{order:7}
+  .topbar .filters{order:8;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .topbar .filters::-webkit-scrollbar{display:none}
   .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:10px}
@@ -334,7 +349,7 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .pill{padding:2px 4px;font-size:11.5px;gap:3px}
   .pill .t{display:none}
   .aitem{grid-template-columns:64px minmax(0,1fr);gap:9px;padding:11px}
-  .datelabel{font-size:16px;min-width:7ch}
+  .datelabel{font-size:15.5px}
   .modal{padding:18px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -424,6 +439,7 @@ const state = {
   ready:false, session:null, membership:null, household:null,
   members:[], events:[], templates:[], reminders:[], push:"unbekannt", fenster:null, suche:null, zaehler:null,
   tasks:[], erledigt:[], aufgabe:null,
+  lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -489,6 +505,16 @@ async function sicherstellenGeladen(){
   }catch(err){ /* beim nächsten Blättern erneut */ }
 }
 
+async function listenLaden(){
+  const hid = state.membership.household_id;
+  const [li, ein] = await Promise.all([
+    sb.from("lists").select("*").eq("household_id", hid).order("sortierung").order("name"),
+    sb.from("list_items").select("*").eq("household_id", hid).order("created_at")
+  ]);
+  if(!li.error)  state.lists = li.data || [];
+  if(!ein.error) state.listItems = ein.data || [];
+}
+
 async function aufgabenLaden(){
   const hid = state.membership.household_id;
   const ab = ymd(addDays(startOfDay(new Date()), -35));
@@ -527,6 +553,7 @@ async function loadAll(){
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   state.reminders = rem.error ? [] : (rem.data || []);
   await aufgabenLaden();
+  await listenLaden();
   subscribe();
 }
 
@@ -538,6 +565,8 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"templates" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"tasks" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"task_completions" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"lists" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"list_items" }, refreshQuiet)
     .subscribe();
 }
 let refreshTimer = null;
@@ -556,10 +585,11 @@ function refreshQuiet(){
       if(!mem.error) state.members = mem.data || [];
       state.events = ev;
       await aufgabenLaden();
+      await listenLaden();
+      if(!tpl.error) state.templates = tpl.data || [];
       state.offline = false;
       datenSichern();
-      if(!tpl.error) state.templates = tpl.data || [];
-      render();
+      renderImHintergrund();
     }catch(e){ /* stiller Abgleich — Fehler beim nächsten Versuch */ }
   }, 250);
 }
@@ -1009,6 +1039,42 @@ function rhythmusText(a){
 }
 
 /* =========================================================
+   Listen
+   ========================================================= */
+
+const LADEN_STANDARD = ["Gemüse/Obst","Brot","Kaffee/Tee/Süßes/Spirituosen","Haushaltsartikel",
+                        "Haushaltswaren","Konserven/Eier/Mehl/Zucker","Kühlregal"];
+function ladenbereiche(){
+  return (state.household && state.household.ladenbereiche && state.household.ladenbereiche.length)
+    ? state.household.ladenbereiche : LADEN_STANDARD;
+}
+function aktiveListe(){
+  return state.lists.find(l => l.id === state.listeAktiv)
+      || state.lists.find(l => l.ist_einkauf)
+      || state.lists[0] || null;
+}
+function eintraegeVon(liste){
+  return state.listItems.filter(e => e.list_id === liste.id);
+}
+// "2 kg Äpfel", "500g Mehl", "3x Joghurt" → "äpfel", "mehl", "joghurt"
+function eintragKern(text){
+  return String(text || "").toLowerCase()
+    .replace(/^\s*[\d.,]+\s*(x|stk|stück|g|kg|l|ml|pkg|packung|packungen|dose|dosen|bund|becher|glas)?\.?\s+/i, "")
+    .trim();
+}
+// Den Ladenbereich übernehmen, den derselbe Artikel beim letzten Mal hatte.
+function bereichRaten(text){
+  const kern = eintragKern(text);
+  if(!kern) return "";
+  const bereiche = ladenbereiche();
+  for(let i = state.listItems.length - 1; i >= 0; i--){
+    const e = state.listItems[i];
+    if(e.bereich && bereiche.indexOf(e.bereich) >= 0 && eintragKern(e.text) === kern) return e.bereich;
+  }
+  return "";
+}
+
+/* =========================================================
    Offline lesen: letzten Stand im Gerät behalten
    ========================================================= */
 
@@ -1025,6 +1091,7 @@ function datenSichern(){
       members: state.members, events: state.events,
       templates: state.templates, reminders: state.reminders,
       tasks: state.tasks, erledigt: state.erledigt,
+      lists: state.lists, listItems: state.listItems,
       fenster: state.fenster
         ? { von: state.fenster.von.toISOString(), bis: state.fenster.bis.toISOString() }
         : null
@@ -1045,6 +1112,8 @@ function datenLaden(){
     state.reminders  = d.reminders  || [];
     state.tasks      = d.tasks      || [];
     state.erledigt   = d.erledigt   || [];
+    state.lists      = d.lists      || [];
+    state.listItems  = d.listItems  || [];
     state.fenster    = d.fenster ? { von:new Date(d.fenster.von), bis:new Date(d.fenster.bis) } : null;
     state.stand      = d.stand || null;
     return true;
@@ -1241,8 +1310,22 @@ async function erinnerungSpeichern(eventId, wert){
 /* =========================================================
    8. Darstellung
    ========================================================= */
+// Neu zeichnen, weil sich im Hintergrund etwas geändert hat (Live-Abgleich,
+// Zeitgeber, Verbindung zurück). Vorher einsammeln, was gerade in einem
+// offenen Fenster steht — sonst wäre halb Getipptes weg.
+function renderImHintergrund(){
+  if(state.dialog && $("#ev-titel")) dialogLesen();
+  if(state.aufgabe && $("#auf-titel")) aufgabeLesen();
+  if(state.eintrag && $("#ein-text")) eintragLesen();
+  render();
+}
+
 function render(){
   const app = $("#app");
+  // Wo der Cursor stand, danach wieder hinsetzen.
+  const aktiv = document.activeElement;
+  const fokus = (aktiv && aktiv.id && app.contains(aktiv))
+    ? { id: aktiv.id, a: aktiv.selectionStart, b: aktiv.selectionEnd } : null;
   if(!sb){ app.innerHTML = viewConfigFehlt(); return; }
   if(!state.ready){ app.innerHTML = '<div class="center"><p class="hint">Wird geladen …</p></div>'; return; }
   if(!state.session){ app.innerHTML = viewLogin(); focusFirst(); return; }
@@ -1257,10 +1340,13 @@ function render(){
         (state.view==="monat" ? monatsAnsicht()
           : state.view==="woche" ? wochenAnsicht()
           : state.view==="aufgaben" ? aufgabenAnsicht()
+          : state.view==="listen" ? listenAnsicht()
           : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div></div>' +
     (state.aufgabe ? dialogAufgabe() : "") +
+    (state.eintrag ? dialogEintrag() : "") +
+    (state.listeDialog ? dialogListe() : "") +
     (state.suche ? dialogSuche() : "") +
     (state.tagDetail ? dialogTag() : "") +
     (state.vorlagenListe ? dialogVorlagen() : "") +
@@ -1271,6 +1357,12 @@ function render(){
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
   if(state.frage && state.frage.feld !== null){
     setTimeout(function(){ const e = $("#frage-feld"); if(e){ e.focus(); e.select(); } }, 30);
+  }else if(fokus){
+    const el = document.getElementById(fokus.id);
+    if(el && el !== document.activeElement){
+      el.focus();
+      try{ if(fokus.a != null) el.setSelectionRange(fokus.a, fokus.b); }catch(_){}
+    }
   }
 }
 function focusFirst(){
@@ -1335,14 +1427,25 @@ function viewSetup(){
 
 function topbar(){
   const c = state.cursor;
+  // Am Handy teilen sich Datum und drei Knöpfe eine Zeile — dort kurz.
+  const eng = window.innerWidth < 641;
   let label;
-  if(state.view === "monat")      label = MONATE[c.getMonth()] + " " + c.getFullYear();
-  else if(state.view === "woche"){
+  if(state.view === "monat"){
+    label = (eng ? MONATE[c.getMonth()].slice(0,3) : MONATE[c.getMonth()]) + " " + c.getFullYear();
+  }else if(state.view === "woche"){
     const mo = mondayOf(c), so = addDays(mo,6);
-    label = mo.getDate() + ". " + MONATE[mo.getMonth()].slice(0,3) + " – " + so.getDate() + ". " + MONATE[so.getMonth()].slice(0,3);
+    label = eng
+      ? (mo.getMonth() === so.getMonth()
+          ? mo.getDate() + ".–" + so.getDate() + "." + (so.getMonth()+1) + "."
+          : mo.getDate() + "." + (mo.getMonth()+1) + ".–" + so.getDate() + "." + (so.getMonth()+1) + ".")
+      : mo.getDate() + ". " + MONATE[mo.getMonth()].slice(0,3) + " – " + so.getDate() + ". " + MONATE[so.getMonth()].slice(0,3);
+  }else{
+    label = eng
+      ? WDS[(c.getDay()+6)%7] + ", " + c.getDate() + "." + (c.getMonth()+1) + "."
+      : WDLANG[(c.getDay()+6)%7] + ", " + c.getDate() + ". " + MONATE[c.getMonth()];
   }
-  else label = WDLANG[(c.getDay()+6)%7] + ", " + c.getDate() + ". " + MONATE[c.getMonth()];
   if(state.view === "aufgaben" && sameDay(c, new Date())) label = "Heute";
+  const mitDatum = state.view !== "listen";
 
   const chips = state.members.map(m =>
     '<button class="fchip" data-act="filter" data-id="' + m.id + '" aria-pressed="' + (!state.hidden.has(m.id)) + '" style="--c:' + esc(m.farbe) + '">' +
@@ -1354,15 +1457,18 @@ function topbar(){
       '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
       '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
       '<button data-act="view" data-v="aufgaben" aria-pressed="' + (state.view==="aufgaben") + '">Aufgaben</button>' +
+      '<button data-act="view" data-v="listen" aria-pressed="' + (state.view==="listen") + '">Listen</button>' +
     '</div>' +
-    '<div class="datenav">' +
-      '<button class="btn icon ghost" data-act="prev" aria-label="zurück">‹</button>' +
-      '<span class="datelabel">' + esc(label) + '</span>' +
-      '<button class="btn icon ghost" data-act="next" aria-label="weiter">›</button>' +
-      '<button class="btn ghost" data-act="heute">Heute</button>' +
-    '</div>' +
+    (mitDatum
+      ? '<div class="datenav">' +
+          '<button class="btn icon ghost" data-act="prev" aria-label="zurück">‹</button>' +
+          '<span class="datelabel">' + esc(label) + '</span>' +
+          '<button class="btn icon ghost" data-act="next" aria-label="weiter">›</button>' +
+          '<button class="btn ghost" data-act="heute">Heute</button>' +
+        '</div>'
+      : "") +
     '<div class="spacer"></div>' +
-    '<div class="filters">' + chips + '</div>' +
+    (mitDatum ? '<div class="filters">' + chips + '</div>' : "") +
     '<button class="btn primary" data-act="neu" aria-label="Termin anlegen">+<span class="lbl">&nbsp;Termin</span></button>' +
     (state.offline
       ? '<span class="offline-chip" title="' + esc(standText() || "kein Stand gespeichert") + '">' +
@@ -1502,6 +1608,67 @@ function aufgabenAnsicht(){
   '</div>';
 }
 
+function eintragZeile(e){
+  return '<div class="aufgabe' + (e.erledigt ? " fertig" : "") + '">' +
+    '<button class="aufgabe-haken" data-act="eintrag-haken" data-id="' + e.id + '" aria-pressed="' + !!e.erledigt + '">' +
+      '<span class="kasten" aria-hidden="true">' + (e.erledigt ? "&#10003;" : "") + '</span>' +
+      '<span class="wort"><span class="titel">' + esc(e.text) + '</span></span>' +
+    '</button>' +
+    '<button class="btn icon ghost" data-act="eintrag-oeffnen" data-id="' + e.id + '" aria-label="bearbeiten">&#9998;</button>' +
+  '</div>';
+}
+
+function listenAnsicht(){
+  const liste = aktiveListe();
+  const reiter = '<div class="listenreiter">' +
+    state.lists.map(l =>
+      '<button class="fchip" data-act="liste-waehlen" data-id="' + l.id + '" aria-pressed="' + (!!liste && l.id === liste.id) + '">' +
+        esc(l.name) + '</button>').join("") +
+    (state.tablet ? "" : '<button class="fchip" data-act="liste-neu">+ Liste</button>') +
+  '</div>';
+  if(!liste){
+    return '<div class="agenda" style="max-width:640px">' + reiter +
+      '<p class="empty">Noch keine Liste angelegt.</p></div>';
+  }
+
+  const alle = eintraegeVon(liste);
+  const offen = alle.filter(e => !e.erledigt), fertig = alle.filter(e => e.erledigt);
+  const bereiche = ladenbereiche();
+
+  let inhalt = "";
+  if(!offen.length){
+    inhalt = '<p class="empty">' + (alle.length ? "Alles erledigt." : "Die Liste ist leer.") + '</p>';
+  }else if(liste.ist_einkauf){
+    // In der Reihenfolge, in der man durch den Laden geht.
+    bereiche.concat([""]).forEach(function(b){
+      const drin = offen.filter(e => b ? e.bereich === b : bereiche.indexOf(e.bereich) < 0);
+      if(drin.length) inhalt += '<div class="field"><label>' + esc(b || "Sonstiges") + '</label>' + drin.map(eintragZeile).join("") + '</div>';
+    });
+  }else{
+    inhalt = '<div class="field">' + offen.map(eintragZeile).join("") + '</div>';
+  }
+
+  return '<div class="agenda" style="max-width:640px">' + reiter +
+    '<div class="listenkopf"><h2>' + esc(liste.name) + '</h2>' +
+      (state.tablet ? "" : '<button class="btn icon ghost" data-act="liste-bearbeiten" aria-label="Liste bearbeiten">&#9998;</button>') +
+    '</div>' +
+    '<form class="eintrag-form" data-act="eintrag-neu">' +
+      '<input id="eintrag-text" type="text" value="' + esc(state.entwurf || "") + '" placeholder="' +
+        (liste.ist_einkauf ? "Was fehlt?" : "Neuer Eintrag") + '" autocomplete="off" enterkeyhint="done">' +
+      (liste.ist_einkauf
+        ? '<select id="eintrag-bereich" aria-label="Ladenbereich"><option value="">Bereich …</option>' +
+            bereiche.map(b => '<option value="' + esc(b) + '">' + esc(b) + '</option>').join("") + '</select>'
+        : "") +
+      '<button class="btn primary" type="submit" aria-label="Hinzufügen">+</button>' +
+    '</form>' +
+    inhalt +
+    (fertig.length
+      ? '<div class="field"><label>Erledigt</label>' + fertig.map(eintragZeile).join("") +
+          '<button class="btn" data-act="erledigte-weg" style="align-self:flex-start;margin-top:4px">Erledigte entfernen</button></div>'
+      : "") +
+  '</div>';
+}
+
 function rail(){
   const heute = new Date(), morgen = addDays(heute,1);
   const blk = (titel, tag) => {
@@ -1618,6 +1785,15 @@ function pushBereich(){
   }
 }
 
+function bereichZeile(name, alt){
+  return '<div class="bereichrow" data-alt="' + esc(alt) + '">' +
+    '<input type="text" value="' + esc(name) + '" aria-label="Ladenbereich">' +
+    '<button class="btn icon ghost" type="button" data-act="bereich-hoch" aria-label="nach oben">&#8593;</button>' +
+    '<button class="btn icon ghost" type="button" data-act="bereich-runter" aria-label="nach unten">&#8595;</button>' +
+    '<button class="btn icon danger" type="button" data-act="bereich-weg" aria-label="entfernen">&#10005;</button>' +
+  '</div>';
+}
+
 function dialogEinstellungen(){
   const zeile = (m, mitKind) =>
     '<div class="memberrow" data-mid="' + m.id + '">' +
@@ -1675,6 +1851,10 @@ function dialogEinstellungen(){
       '<button class="btn" type="button" data-act="kategorie-neu" style="flex:0 0 auto">+ Kategorie</button>' +
     '</div>' +
     '<div class="field"><label>Erinnerungen auf diesem Gerät</label>' + pushBereich() + '</div>' +
+    '<div class="field"><label>Ladenbereiche der Einkaufsliste</label>' +
+      '<div id="bereichliste">' + ladenbereiche().map(b => bereichZeile(b, b)).join("") + '</div>' +
+      '<button class="btn" type="button" data-act="bereich-neu" style="align-self:flex-start;margin-top:6px">+ Bereich</button>' +
+      '<span class="hint">In der Reihenfolge, in der ihr durch den Laden geht.</span></div>' +
     '<div class="field"><label>Vorlagen</label>' +
       (vorlagenZeilen || '<p class="hint">Keine. Praktisch für wiederkehrende Dienste — ein Tipp in der Tagesübersicht legt den Termin an.</p>') +
       '<button class="btn" type="button" data-act="vorlage-neu" style="align-self:flex-start;margin-top:8px">+ Vorlage</button></div>' +
@@ -1855,6 +2035,48 @@ function dialogAufgabe(){
   '</form></div>';
 }
 
+function eintragLesen(){
+  const e = state.eintrag; if(!e) return;
+  const t = $("#ein-text"); if(t) e.text = t.value;
+  const b = $("#ein-bereich"); if(b) e.bereich = b.value;
+}
+function dialogEintrag(){
+  const e = state.eintrag;
+  const liste = state.lists.find(l => l.id === e.list_id);
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="eintrag-speichern">' +
+    '<h2>Eintrag</h2>' +
+    '<div class="field"><label for="ein-text">Text</label><input id="ein-text" type="text" value="' + esc(e.text) + '" required></div>' +
+    (liste && liste.ist_einkauf
+      ? '<div class="field"><label for="ein-bereich">Ladenbereich</label><select id="ein-bereich">' +
+          '<option value="">Sonstiges</option>' +
+          ladenbereiche().map(b => '<option value="' + esc(b) + '"' + (e.bereich === b ? " selected" : "") + '>' + esc(b) + '</option>').join("") +
+        '</select></div>'
+      : "") +
+    '<div class="actions">' +
+      '<button class="btn danger" type="button" data-act="eintrag-loeschen">Löschen</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
+function dialogListe(){
+  const l = state.listeDialog;
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="liste-speichern">' +
+    '<h2>Liste</h2>' +
+    '<div class="field"><label for="li-name">Name</label><input id="li-name" type="text" value="' + esc(l.name) + '" required></div>' +
+    '<label class="check"><input id="li-einkauf" type="checkbox"' + (l.ist_einkauf ? " checked" : "") + '> Das ist die Einkaufsliste</label>' +
+    '<span class="hint">Die Einkaufsliste wird nach Ladenbereichen sortiert. Es gibt immer nur eine.</span>' +
+    '<div class="actions">' +
+      '<button class="btn danger" type="button" data-act="liste-loeschen">Liste löschen</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
 function dialogSuche(){
   const su = state.suche;
   const zeile = (t) => {
@@ -2004,7 +2226,8 @@ function overlayChronikLoesen(){
 }
 function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
-            state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe);
+            state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe ||
+            state.eintrag || state.listeDialog);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -2017,6 +2240,8 @@ function obersteSchliessen(){
   else if(state.importer)      state.importer = null;
   else if(state.dialog)        state.dialog = null;
   else if(state.aufgabe)       state.aufgabe = null;
+  else if(state.eintrag)       state.eintrag = null;
+  else if(state.listeDialog)   state.listeDialog = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
   else if(state.suche)         state.suche = null;
@@ -2028,6 +2253,7 @@ function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
+  state.eintrag = null; state.listeDialog = null;
   overlayChronikLoesen();
   render();
 }
@@ -2038,6 +2264,7 @@ window.addEventListener("popstate", function(){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
+    state.eintrag = null; state.listeDialog = null;
     render();
   }
 });
@@ -2156,6 +2383,33 @@ async function aktion(act, el){
     case "push-an":   return pushEinschalten();
     case "push-aus":  return pushAusschalten();
     case "push-test": return pushTest();
+    case "liste-waehlen":
+      state.listeAktiv = el.dataset.id;
+      localStorage.setItem("fp.liste", state.listeAktiv);
+      return render();
+    case "liste-neu": return listeAnlegen();
+    case "liste-bearbeiten": {
+      const l = aktiveListe(); if(!l) return;
+      state.listeDialog = { id:l.id, name:l.name, ist_einkauf:!!l.ist_einkauf };
+      overlayOeffnen(); return render();
+    }
+    case "liste-loeschen": return listeLoeschen();
+    case "eintrag-haken": return eintragUmschalten(el.dataset.id);
+    case "eintrag-oeffnen": {
+      const e = state.listItems.find(x => x.id === el.dataset.id); if(!e) return;
+      state.eintrag = { id:e.id, list_id:e.list_id, text:e.text, bereich:e.bereich || "" };
+      overlayOeffnen(); return render();
+    }
+    case "eintrag-loeschen": return eintragLoeschen();
+    case "erledigte-weg": return erledigteEntfernen();
+    case "bereich-hoch": { const r = el.closest(".bereichrow"); if(r && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); return; }
+    case "bereich-runter": { const r = el.closest(".bereichrow"); if(r && r.nextElementSibling) r.parentNode.insertBefore(r.nextElementSibling, r); return; }
+    case "bereich-weg": { const r = el.closest(".bereichrow"); if(r) r.remove(); return; }
+    case "bereich-neu": {
+      const liste = $("#bereichliste");
+      if(liste){ liste.insertAdjacentHTML("beforeend", bereichZeile("", "")); const f = liste.lastElementChild.querySelector("input"); if(f) f.focus(); }
+      return;
+    }
     case "aufgabe-neu":
       state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render();
     case "aufgabe-oeffnen": {
@@ -2221,6 +2475,9 @@ document.addEventListener("submit", async function(e){
   const act = form.dataset.act;
   try{
     if(act === "aufgabe-speichern") return await aufgabeSpeichern();
+    if(act === "eintrag-neu")       return await eintragHinzufuegen();
+    if(act === "eintrag-speichern") return await eintragSpeichern();
+    if(act === "liste-speichern")   return await listeSpeichern();
     if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
     if(act === "speichern")         return await terminSpeichern();
@@ -2317,7 +2574,17 @@ document.addEventListener("touchend", function(e){
   monatWechseln(weg > 0 ? 1 : -1);
 }, { passive:true });
 
+document.addEventListener("input", function(e){
+  if(e.target && e.target.id === "eintrag-text"){
+    state.entwurf = e.target.value;
+    // Bereich vom letzten Mal vorschlagen — solange niemand von Hand gewählt hat.
+    const sel = document.getElementById("eintrag-bereich");
+    if(sel && !sel.dataset.vonHand) sel.value = bereichRaten(e.target.value);
+  }
+});
+
 document.addEventListener("change", function(e){
+  if(e.target && e.target.id === "eintrag-bereich") e.target.dataset.vonHand = "1";
   // Wiederholung: nur das Enddatum ein- oder ausblenden. Kein Neuzeichnen —
   // das würde dem Gerät das Feld unter der offenen Auswahlliste wegziehen.
   if(e.target && e.target.id === "ev-wdh" && state.dialog){
@@ -2656,6 +2923,144 @@ async function aufgabeLoeschen(){
   state.busy = false; render();
 }
 
+async function eintragHinzufuegen(){
+  const liste = aktiveListe(); if(!liste) return;
+  const feld = $("#eintrag-text"), sel = $("#eintrag-bereich");
+  const text = (feld ? feld.value : "").trim();
+  if(!text) return;
+  const zeile = {
+    household_id: state.membership.household_id, list_id: liste.id, text: text,
+    bereich: liste.ist_einkauf ? ((sel && sel.value) || bereichRaten(text)) : ""
+  };
+  // Sofort zeigen und das Feld leeren — beim Einkaufen tippt man mehrere hintereinander.
+  const vorlaeufig = Object.assign({ id:"neu-" + Date.now(), erledigt:false, created_at:new Date().toISOString() }, zeile);
+  state.listItems = state.listItems.concat([vorlaeufig]);
+  state.entwurf = "";
+  render();
+  setTimeout(function(){ const f = $("#eintrag-text"); if(f) f.focus(); }, 20);
+  try{
+    const r = await sb.from("list_items").insert(zeile).select("*").single();
+    if(r.error) throw r.error;
+    state.listItems = state.listItems.map(e => e === vorlaeufig ? Object.assign({}, vorlaeufig, r.data) : e);
+    datenSichern();
+  }catch(err){
+    state.listItems = state.listItems.filter(e => e !== vorlaeufig);
+    state.entwurf = text;
+    setToast(fehlerText(err));
+    render();
+  }
+}
+
+async function eintragUmschalten(id){
+  const e = state.listItems.find(x => x.id === id); if(!e) return;
+  const neu = !e.erledigt;
+  state.listItems = state.listItems.map(x => x.id === id ? Object.assign({}, x, { erledigt:neu }) : x);
+  render();
+  try{
+    const r = await sb.from("list_items").update({ erledigt:neu, erledigt_am: neu ? new Date().toISOString() : null }).eq("id", id);
+    if(r.error) throw r.error;
+    datenSichern();
+  }catch(err){
+    await listenLaden();
+    setToast(fehlerText(err));
+    render();
+  }
+}
+
+async function erledigteEntfernen(){
+  const liste = aktiveListe(); if(!liste) return;
+  const weg = eintraegeVon(liste).filter(e => e.erledigt);
+  if(!weg.length) return;
+  state.listItems = state.listItems.filter(e => weg.indexOf(e) < 0);
+  render();
+  try{
+    const r = await sb.from("list_items").delete().eq("list_id", liste.id).eq("erledigt", true);
+    if(r.error) throw r.error;
+    datenSichern();
+    setToast(weg.length + (weg.length === 1 ? " Eintrag" : " Einträge") + " entfernt");
+  }catch(err){
+    await listenLaden();
+    setToast(fehlerText(err));
+    render();
+  }
+}
+
+async function eintragSpeichern(){
+  eintragLesen();
+  const e = state.eintrag;
+  if(!e.text.trim()) return;
+  try{
+    const r = await sb.from("list_items").update({ text:e.text.trim(), bereich:e.bereich || "" }).eq("id", e.id);
+    if(r.error) throw r.error;
+    state.eintrag = null; chronikPruefen();
+    await listenLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
+async function eintragLoeschen(){
+  const e = state.eintrag; if(!e) return;
+  try{
+    const r = await sb.from("list_items").delete().eq("id", e.id);
+    if(r.error) throw r.error;
+    state.eintrag = null; chronikPruefen();
+    await listenLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
+async function listeAnlegen(){
+  const name = await frage({ titel:"Neue Liste", text:"Zum Beispiel „Packen Urlaub“ oder „Baumarkt“.", feld:"", platzhalter:"Name", knopf:"Anlegen" });
+  if(!name || !String(name).trim()) return;
+  try{
+    const r = await sb.from("lists").insert({
+      household_id: state.membership.household_id, name: String(name).trim(),
+      ist_einkauf: !state.lists.some(l => l.ist_einkauf), sortierung: state.lists.length
+    }).select("*").single();
+    if(r.error) throw r.error;
+    await listenLaden();
+    if(r.data && r.data.id){ state.listeAktiv = r.data.id; localStorage.setItem("fp.liste", r.data.id); }
+    datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
+async function listeSpeichern(){
+  const l = state.listeDialog; if(!l) return;
+  const name = ($("#li-name") ? $("#li-name").value : l.name).trim();
+  const einkauf = $("#li-einkauf") ? $("#li-einkauf").checked : l.ist_einkauf;
+  if(!name) return;
+  try{
+    // Es gibt nur eine Einkaufsliste: vorher bei allen anderen austragen.
+    if(einkauf){
+      const a = await sb.from("lists").update({ ist_einkauf:false })
+        .eq("household_id", state.membership.household_id).neq("id", l.id);
+      if(a.error) throw a.error;
+    }
+    const r = await sb.from("lists").update({ name, ist_einkauf:einkauf }).eq("id", l.id);
+    if(r.error) throw r.error;
+    state.listeDialog = null; chronikPruefen();
+    await listenLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
+async function listeLoeschen(){
+  const l = state.listeDialog; if(!l) return;
+  const anzahl = state.listItems.filter(e => e.list_id === l.id).length;
+  if(!(await frage({ titel:"Liste „" + l.name + "“ löschen?",
+                     text: anzahl ? "Mit allen " + anzahl + " Einträgen." : "Sie ist leer.",
+                     knopf:"Löschen", gefahr:true }))) return;
+  try{
+    const r = await sb.from("lists").delete().eq("id", l.id);
+    if(r.error) throw r.error;
+    state.listeDialog = null; chronikPruefen();
+    if(state.listeAktiv === l.id){ state.listeAktiv = null; localStorage.removeItem("fp.liste"); }
+    await listenLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
 async function zaehlerLaden(){
   try{
     const hid = state.membership.household_id;
@@ -2713,6 +3118,12 @@ async function einstellungenSpeichern(){
     });
   });
 
+  // Ladenbereiche in der angezeigten Reihenfolge einsammeln
+  const bereichZeilen = Array.from(document.querySelectorAll(".bereichrow")).map(r => ({
+    alt: r.dataset.alt || "", neu: (r.querySelector("input").value || "").trim()
+  })).filter(b => b.neu);
+  const bereicheNeu = bereichZeilen.map(b => b.neu).filter((b, i, a) => a.indexOf(b) === i);
+
   const vorlagen = [];
   document.querySelectorAll(".vorlagerow").forEach(row=>{
     const v = f => row.querySelector('[data-f="' + f + '"]');
@@ -2741,6 +3152,18 @@ async function einstellungenSpeichern(){
       if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe || neu.ist_kind !== m.ist_kind){
         const r = await sb.from("members").update(neu).eq("id", g.id);
         if(r.error) throw r.error;
+      }
+    }
+    if(document.getElementById("bereichliste") && bereicheNeu.join("\n") !== ladenbereiche().join("\n")){
+      const r = await sb.from("households").update({ ladenbereiche: bereicheNeu }).eq("id", state.household.id);
+      if(r.error) throw r.error;
+      // Umbenannte Bereiche auch bei den vorhandenen Einträgen nachziehen.
+      for(const b of bereichZeilen){
+        if(b.alt && b.alt !== b.neu){
+          const u = await sb.from("list_items").update({ bereich:b.neu })
+            .eq("household_id", state.membership.household_id).eq("bereich", b.alt);
+          if(u.error) throw u.error;
+        }
       }
     }
     for(const g of vorlagen){
@@ -2816,6 +3239,7 @@ async function neuLaden(){
   const rem = await sb.from("reminders").select("*").eq("user_id", state.session.user.id);
   if(rem.data) state.reminders = rem.data;
   await aufgabenLaden();
+  await listenLaden();
   datenSichern();
 }
 
@@ -2875,11 +3299,11 @@ async function start(){
     if(!document.hidden && state.membership) refreshQuiet();
   });
 
-  window.addEventListener("offline", function(){ state.offline = true; render(); });
+  window.addEventListener("offline", function(){ state.offline = true; renderImHintergrund(); });
   window.addEventListener("online", function(){
     state.offline = false;
     if(state.membership) refreshQuiet(); else ladenMitWiederholung(true);
-    render();
+    renderImHintergrund();
   });
 }
 
@@ -2912,7 +3336,7 @@ function zeitgeberStarten(){
       // Liegt die letzte Bedienung lange zurück, zeigt das Gerät wieder
       // den heutigen Tag. Wer gerade blättert, wird nicht gestört.
       if(!overlayOffen() && Date.now() - letzteBedienung > 10 * 60000) state.cursor = new Date();
-      render();
+      renderImHintergrund();
     }
     // Sicherheitsnetz: Live-Änderungen können nach einem Verbindungsabbruch
     // ausbleiben. Alle fünf Minuten nachziehen.
