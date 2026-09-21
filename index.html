@@ -353,6 +353,65 @@ button.pill:hover{filter:brightness(1.08)}
 .wurf small{font-size:13px;color:var(--muted)}
 .wurf .fehlt{color:var(--danger);font-weight:600}
 .wurf .da{color:var(--accent);font-weight:600}
+.tafel{
+  display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto 1fr;gap:14px;
+  height:100%;min-height:0;
+}
+.tafelkopf{grid-column:1 / -1;display:flex;align-items:baseline;gap:18px}
+.tafeluhr{font-size:56px;font-weight:700;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.tafeldatum{font-size:22px;font-weight:600;display:flex;align-items:baseline;gap:10px}
+.tafeldatum small{font-size:15px;color:var(--muted);font-weight:600}
+.tafelspalte{
+  min-height:0;overflow:auto;padding:12px 14px;border-radius:var(--radius);
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--karte);
+}
+.tafelspalte h2{margin:4px 0 8px;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tafelspalte h2 ~ h2{margin-top:18px}
+.tafeltermin{
+  display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;margin-bottom:6px;
+  padding:10px 12px;border:none;border-left:6px solid var(--c-bg,var(--line-strong));border-radius:9px;
+  background:var(--surface-3);font:inherit;color:inherit;cursor:pointer;
+}
+.tafeltermin .t{flex:none;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;min-width:52px}
+.tafeltermin .n{flex:1 1 auto;min-width:0;font-size:17px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tafeltermin .w{flex:none;font-size:13px;font-weight:800;color:var(--muted)}
+.tafelleer{color:var(--muted);margin:2px 0 8px}
+.tafelgut{color:var(--accent);font-weight:700;margin:6px 0}
+.tafel .aufgabe-haken{min-height:52px}
+.tafel .aufgabe .titel{font-size:17px}
+.tafelessen{display:flex;gap:12px;align-items:baseline;padding:8px 4px;border-bottom:1px solid var(--line)}
+.tafelessen .wt{flex:none;width:28px;font-weight:700;color:var(--muted)}
+.tafelessen .g{font-size:16px;font-weight:600;min-width:0}
+.tafelessen.heute{background:var(--accent-soft);border-radius:8px;border-bottom-color:transparent}
+.tafelessen.heute .wt{color:var(--accent)}
+.tafelessen.vorbei{opacity:.5}
+.tafeleinkauf{
+  margin-top:14px;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line-strong);
+  background:var(--surface-3);font:inherit;font-weight:600;color:inherit;cursor:pointer;
+}
+@media (max-width:900px){
+  .tafel{grid-template-columns:1fr;grid-template-rows:none;height:auto}
+  .tafeluhr{font-size:42px}
+}
+.standby{
+  position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:#0E120D;color:#E5EBE3;cursor:pointer;text-align:center;padding:24px;
+}
+.sb-uhr{font-size:140px;font-weight:300;letter-spacing:-.04em;line-height:1}
+.sb-datum{font-size:28px;color:#A9B3AA;margin-bottom:26px}
+.sb-liste{display:flex;flex-direction:column;gap:8px;min-width:min(520px,90vw)}
+.sb-termin{display:flex;gap:16px;align-items:baseline;padding:10px 16px;border-left:6px solid var(--c-bg,#555);background:#1A1F1A;border-radius:8px;text-align:left}
+.sb-termin .t{flex:none;min-width:70px;font-size:20px;font-weight:600;color:#A9B3AA;font-variant-numeric:tabular-nums}
+.sb-termin .n{font-size:22px;font-weight:600}
+.sb-essen{margin-top:22px;font-size:20px;color:#A9B3AA}
+/* Nacht: fast schwarz, nur die Uhr schwach sichtbar. */
+.standby.nacht{background:#000;color:#4A4F49}
+.standby.nacht .sb-datum,.standby.nacht .sb-essen,.standby.nacht .sb-termin .t{color:#3A3E39}
+.standby.nacht .sb-termin{background:#0A0B0A;border-left-color:#2A2D29}
+.standby.nacht .sb-liste,.standby.nacht .sb-essen{display:none}
+/* Wer nachts die Tafel antippt, bekommt sie gedimmt. */
+html.nacht .shell,html.nacht .backdrop{filter:brightness(.55)}
 .zutatzeile{
   display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin-bottom:8px;
   border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
@@ -562,7 +621,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 20:42";
+const FASSUNG = "2026-09-21 20:55";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -635,7 +694,8 @@ const state = {
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
   zutatFilter:"", zutatDialog:null,
   plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
-  view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
+  view: localStorage.getItem("fp.tablet") === "1" ? "tafel" : (localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat")),
+  standby:false,
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
@@ -1644,9 +1704,11 @@ function render(){
           : state.view==="gerichte" ? gerichteAnsicht()
           : state.view==="zutaten" ? zutatenAnsicht()
           : state.view==="essen" ? essensplanAnsicht()
+          : state.view==="tafel" ? tafelAnsicht()
           : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div>' + untenleiste() + '</div>' +
+    (state.standby ? standbyAnsicht() : "") +
     (state.aufgabe ? dialogAufgabe() : "") +
     (state.eintrag ? dialogEintrag() : "") +
     (state.listeDialog ? dialogListe() : "") +
@@ -1812,7 +1874,7 @@ function topbar(){
   const tagesbezogen = state.view === "tag" || state.view === "aufgaben";
   const aufHeute = tagesbezogen && sameDay(c, new Date());
   if(state.view === "aufgaben" && aufHeute) label = "Heute";
-  const mitDatum = bereich === "kalender" || bereich === "aufgaben";
+  const mitDatum = (bereich === "kalender" && state.view !== "tafel") || bereich === "aufgaben";
   const filterAn = state.hidden.size > 0;
   const chipsZeigen = mitDatum && (state.filterOffen || filterAn);
 
@@ -1831,6 +1893,7 @@ function topbar(){
       '</nav>' +
       (bereich === "kalender"
         ? '<div class="viewtabs">' +
+            (state.tablet ? '<button data-act="view" data-v="tafel" aria-pressed="' + (state.view==="tafel") + '">Tafel</button>' : "") +
             '<button data-act="view" data-v="monat" aria-pressed="' + (state.view==="monat") + '">Monat</button>' +
             '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
             '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
@@ -1852,7 +1915,7 @@ function topbar(){
           '<button class="btn icon ghost" data-act="next" aria-label="weiter">' + ICON.rechts(20) + '</button>' +
           (aufHeute ? "" : '<button class="btn ghost heute-knopf" data-act="heute">Heute</button>') +
         '</div>'
-      : '<h1 class="bereichstitel">' + (bereich === "kueche" ? "Küche" : "Listen") + '</h1>') +
+      : '<h1 class="bereichstitel">' + (bereich === "kueche" ? "Küche" : bereich === "kalender" ? "Heute" : "Listen") + '</h1>') +
     '<div class="spacer"></div>' +
     '<div class="tb-rechts">' +
     (state.offline
@@ -2352,6 +2415,92 @@ function essensplanAnsicht(){
     '</div>';
   };
   return '<div class="agenda" style="max-width:720px">' + kopf + knoepfe + tage.map(tag).join("") + '</div>';
+}
+
+/* =========================================================
+   Wandtafel (nur Wandtablet): alles für heute auf einen Blick.
+   Nach 5 Minuten ohne Berührung Standby, von 21 bis 6 Uhr Nacht.
+   ========================================================= */
+const STANDBY_NACH = 5 * 60000, NACHT_AB = 21, NACHT_BIS = 6;
+function nachtJetzt(){ const h = new Date().getHours(); return h >= NACHT_AB || h < NACHT_BIS; }
+function uhrText(){ return hm(new Date()); }
+function tafelDatum(d){ return WDLANG[(d.getDay()+6)%7] + ", " + d.getDate() + ". " + MONATE[d.getMonth()]; }
+
+function tafelTermin(o){
+  const wer = (o.ev.member_ids || []).map(memberById).filter(Boolean).map(m => m.kuerzel || m.name).join(" ");
+  return '<button class="tafeltermin" data-act="oeffnen" data-id="' + o.ev.id + '" data-occ="' + ymd(o.s) + '" style="' + farbenOf(o.ev) + '">' +
+    '<span class="t">' + (o.ev.ganztags ? "ganzt." : hm(o.s)) + '</span>' +
+    '<span class="n">' + esc(o.ev.titel) + '</span>' +
+    (wer ? '<span class="w">' + esc(wer) + '</span>' : "") +
+  '</button>';
+}
+function tafelAnsicht(){
+  const heute = new Date(), morgen = addDays(heute, 1);
+  const termine = (tag, leer) => {
+    const occ = occurrencesOn(tag);
+    return occ.length ? occ.map(tafelTermin).join("") : '<p class="tafelleer">' + leer + '</p>';
+  };
+  const aufgaben = aufgabenAn(heute);
+  const offen = aufgaben.filter(a => !abgehakt(a, heute)), fertig = aufgaben.filter(a => abgehakt(a, heute));
+  const mo = mondayOf(heute);
+  const essen = [0,1,2,3,4,5,6].map(i => addDays(mo, i)).map(d => {
+    const e = planAm(d);
+    return '<div class="tafelessen' + (sameDay(d, heute) ? " heute" : "") + (d < startOfDay(heute) ? " vorbei" : "") + '">' +
+      '<span class="wt">' + WDS[(d.getDay()+6)%7] + '</span>' +
+      '<span class="g">' + (e.length ? esc(e.map(planName).join(" · ")) : "—") + '</span></div>';
+  }).join("");
+  const einkauf = einkaufsliste(), nochOffen = einkauf ? eintraegeVon(einkauf).filter(e => !e.erledigt).length : 0;
+  return '<div class="tafel">' +
+    '<div class="tafelkopf"><span class="tafeluhr">' + uhrText() + '</span>' +
+      '<span class="tafeldatum">' + tafelDatum(heute) + '<small>KW ' + kalenderwoche(heute) + '</small></span></div>' +
+    '<section class="tafelspalte"><h2>Heute</h2>' + termine(heute, "Keine Termine.") +
+      '<h2>Morgen · ' + WDLANG[(morgen.getDay()+6)%7] + '</h2>' + termine(morgen, "Keine Termine.") + '</section>' +
+    '<section class="tafelspalte"><h2>Aufgaben</h2>' +
+      (aufgaben.length ? offen.concat(fertig).map(a => aufgabeZeile(a, heute, true)).join("") : '<p class="tafelleer">Heute nichts zu tun.</p>') +
+      (aufgaben.length && !offen.length ? '<p class="tafelgut">Alles erledigt!</p>' : "") + '</section>' +
+    '<section class="tafelspalte"><h2>Essen diese Woche</h2>' + essen +
+      (nochOffen ? '<button class="tafeleinkauf" data-act="bereich" data-b="listen">Einkaufsliste: ' + nochOffen + ' offen</button>' : "") +
+    '</section>' +
+  '</div>';
+}
+function standbyAnsicht(){
+  const jetzt = new Date(), heute = startOfDay(jetzt);
+  // Die nächsten Termine: was heute noch kommt, dann morgen.
+  const naechste = occurrencesOn(heute).filter(o => o.ev.ganztags || o.e > jetzt).map(o => ({ o:o, tag:"" }))
+    .concat(occurrencesOn(addDays(heute, 1)).map(o => ({ o:o, tag:"morgen " })))
+    .slice(0, 4);
+  const essen = planAm(heute).map(planName);
+  return '<div class="standby' + (nachtJetzt() ? " nacht" : "") + '" data-act="standby-weg">' +
+    '<div class="sb-uhr tafeluhr">' + uhrText() + '</div>' +
+    '<div class="sb-datum">' + tafelDatum(jetzt) + '</div>' +
+    (naechste.length ? '<div class="sb-liste">' + naechste.map(x =>
+      '<div class="sb-termin" style="' + farbenOf(x.o.ev) + '"><span class="t">' + x.tag + (x.o.ev.ganztags ? "" : hm(x.o.s)) + '</span>' +
+        '<span class="n">' + esc(x.o.ev.titel) + '</span></div>').join("") + '</div>' : "") +
+    (essen.length ? '<div class="sb-essen">Heute: ' + esc(essen.join(" · ")) + '</div>' : "") +
+  '</div>';
+}
+
+// Läuft auf dem Tablet alle 15 Sekunden: Uhr nachführen (ohne Neuzeichnen),
+// Standby und Nacht umschalten.
+let wachsperre = null;
+function wachHalten(){
+  if(!state.tablet || !navigator.wakeLock || document.hidden) return;
+  navigator.wakeLock.request("screen").then(function(w){ wachsperre = w; }).catch(function(){});
+}
+document.addEventListener("visibilitychange", function(){ if(!document.hidden) wachHalten(); });
+function tafelTakt(){
+  document.documentElement.classList.toggle("nacht", !!(state.tablet && nachtJetzt()));
+  if(!state.tablet || !state.membership) return;
+  $$(".tafeluhr").forEach(el => { el.textContent = uhrText(); });
+  if(!state.standby && Date.now() - letzteBedienung > STANDBY_NACH){
+    overlaySchliessen();                    // halbe Eingaben am Wandtablet verwerfen
+    state.standby = true; state.view = "tafel";
+    render();
+  }else if(state.standby){
+    // Termin vorbei, Nacht beginnt … selten genug, um einfach neu zu zeichnen.
+    const sb = $(".standby");
+    if(sb && sb.classList.contains("nacht") !== nachtJetzt()) render();
+  }
 }
 
 function rail(){
@@ -3299,8 +3448,8 @@ async function aktion(act, el){
     case "bereich": {
       const b = el.dataset.b;
       if(b === "kalender"){
-        state.view = localStorage.getItem("fp.kalenderView") || "monat";
-        if(["monat","woche","tag"].indexOf(state.view) < 0) state.view = "monat";
+        state.view = state.tablet ? "tafel" : (localStorage.getItem("fp.kalenderView") || "monat");
+        if(["monat","woche","tag","tafel"].indexOf(state.view) < 0) state.view = "monat";
       }else if(b === "kueche"){
         const kv = localStorage.getItem("fp.kuecheView");
         state.view = ["gerichte","zutaten","essen"].indexOf(kv) >= 0 ? kv : "lager";
@@ -3367,6 +3516,9 @@ async function aktion(act, el){
     case "tablet-modus":
       state.tablet = !state.tablet;
       localStorage.setItem("fp.tablet", state.tablet ? "1" : "0");
+      if(state.tablet){ state.view = "tafel"; wachHalten(); }
+      else if(state.view === "tafel") state.view = "monat";
+      tafelTakt();
       appBeschreibungWaehlen();
       return render();
     case "neu-laden": return ladenMitWiederholung(true);
@@ -3428,6 +3580,9 @@ async function aktion(act, el){
     case "heute-kochen": state.heuteKochen = true; overlayOeffnen(); return render();
     case "heute-waehlen": state.heuteKochen = false; chronikPruefen(); return planEintragen(ymd(new Date()), el.dataset.id, "");
     case "wochen-einkauf": state.wochenEinkauf = {}; overlayOeffnen(); return render();
+    case "standby-weg":
+      state.standby = false; state.view = "tafel"; state.cursor = new Date();
+      return render();
     case "wuerfeln": {
       const g = wuerfeln(el.dataset.ohne || null); if(!g) return;
       // Gewählten Tag beim Nochmal-Würfeln behalten.
@@ -4651,6 +4806,8 @@ async function neueFassungPruefen(){
 
 function zeitgeberStarten(){
   letzterTag = ymd(new Date());
+  setInterval(tafelTakt, 15000);
+  tafelTakt(); wachHalten();
   setInterval(function(){
     if(!state.membership) return;
     const heute = ymd(new Date());
