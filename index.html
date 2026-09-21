@@ -15,7 +15,7 @@
   --radius:12px;
   --shadow:0 1px 2px rgba(23,32,28,.07), 0 10px 30px -20px rgba(23,32,28,.45);
   --karte:0 1px 2px rgba(23,32,28,.05), 0 6px 16px -12px rgba(23,32,28,.30);
-  --navhoehe:66px;
+  --navhoehe:48px;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -92,8 +92,8 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 /* ---------- Rahmen ---------- */
 .shell{height:100%;display:flex;flex-direction:column}
 .topbar{
-  flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);
+  flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:7px 14px;background:var(--surface);border-bottom:1px solid var(--line);
 }
 .topbar .spacer{flex:1 1 auto}
 .viewtabs{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px}
@@ -352,52 +352,50 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
 
 /* ---------- Handy ---------- */
 @media (max-width:640px){
-  .topbar{padding:9px 11px;gap:8px 4px}
+  .topbar{padding:6px 10px;gap:5px 2px}
   /* Oben: Datum und Knöpfe in einer Zeile, darunter Monat/Woche/Tag.
      Die Bereiche und das Plus wandern nach unten zum Daumen. */
   .haupttabs, .neu-knopf{display:none}
+  /* Kalender: Monat/Woche/Tag zuoberst, darunter Datum und Knöpfe. */
+  .topbar .tb-links{order:0;width:100%}
+  .topbar .tb-links:not(:has(.viewtabs)){display:none}
+  .topbar .viewtabs{width:100%;padding:2px;border-radius:9px}
+  .topbar .viewtabs button{flex:1 1 0;min-height:30px;font-size:13.5px}
   .topbar .datenav, .topbar .bereichstitel{order:1}
   .topbar .datenav{flex:1 1 auto;min-width:0;gap:0}
-  .topbar .datelabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar .datelabel{font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar .bereichstitel{font-size:17px}
   .topbar .spacer{order:2}
-  .topbar .tb-rechts{order:3;gap:2px}
+  .topbar .tb-rechts{order:3;gap:0}
   .topbar .offline-chip .lbl{display:none}
-  .topbar .tb-links{order:4;width:100%}
-  .topbar .tb-links:not(:has(.viewtabs)){display:none}
-  .topbar .viewtabs{width:100%}
-  .topbar .viewtabs button{flex:1 1 0}
-  .topbar .btn.icon{min-width:40px;padding:0 8px}
-  .topbar .heute-knopf{padding:0 9px}
+  .topbar .btn{min-height:36px}
+  .topbar .btn.icon{min-width:36px;padding:0 6px}
+  .topbar .heute-knopf{padding:0 8px;font-size:14px}
   .topbar .filters{order:8;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .topbar .filters::-webkit-scrollbar{display:none}
   .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:10px}
   .day{min-height:66px;padding:3px 3px 5px;gap:2px}
   .daynum{font-size:12px}
-  /* In der schmalen Zelle nur die Farbe — die Details stehen in der
-     Tagesübersicht, die ein Tipp öffnet. */
-  .day .pill{height:7px;min-height:0;padding:0;border-radius:4px;background:var(--c-balken, var(--c-bg))}
   .day .more .lbl{display:none}
-  .day .pill > *{display:none}
-  .day .daylist{gap:3px;margin-top:2px}
   .day .more{font-size:10.5px;padding:0 2px}
   .pill{padding:2px 4px;font-size:11.5px;gap:3px}
   .pill .t{display:none}
   .untenleiste{
     display:flex;flex:none;background:var(--surface);border-top:1px solid var(--line);
-    padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+    padding:2px 6px calc(2px + env(safe-area-inset-bottom));
   }
   .untenleiste button{
-    flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:4px;
-    border:none;background:none;color:var(--muted);font-size:11.5px;font-weight:600;
-    padding:5px 0 3px;letter-spacing:.01em;
+    flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:1px;
+    border:none;background:none;color:var(--muted);font-size:10.5px;font-weight:600;
+    padding:3px 0 2px;
   }
-  .untenleiste button svg{padding:4px 18px;border-radius:999px;box-sizing:content-box;transition:background .15s}
+  .untenleiste button svg{padding:2px 14px;border-radius:999px;box-sizing:content-box}
   .untenleiste button[aria-pressed="true"]{color:var(--accent)}
   .untenleiste button[aria-pressed="true"] svg{background:var(--accent-soft)}
   .fab{
     display:flex;position:fixed;right:16px;z-index:20;
-    bottom:calc(var(--navhoehe) + 14px + env(safe-area-inset-bottom));
+    bottom:calc(var(--navhoehe) + 12px + env(safe-area-inset-bottom));
     width:56px;height:56px;border-radius:18px;border:none;
     align-items:center;justify-content:center;
     background:var(--accent);color:var(--accent-text);
@@ -807,7 +805,7 @@ function farbenOf(ev){
     return "--c-bg:" + c + ";--c-fg:" + kontrastfarbe(c);
   }
   if(ids.length > 1) return "--c-bg:var(--accent);--c-fg:var(--accent-text)";
-  return "--c-bg:var(--surface-2);--c-fg:var(--text);--c-balken:var(--line-strong)";
+  return "--c-bg:var(--surface-2);--c-fg:var(--text)";
 }
 
 // Im Kalender steht nur der erste Buchstabe des Kürzels — mehr
@@ -1583,19 +1581,21 @@ function topbar(){
           'aria-pressed="' + chipsZeigen + '" aria-label="Personen filtern">' + ICON.filter(19) +
           (filterAn ? '<span class="punkt"></span>' : "") + '</button>'
       : "") +
-    '<button class="btn icon ghost" data-act="suche-oeffnen" aria-label="Suchen">' + ICON.suche(19) + '</button>' +
+    // Die Suche durchsucht nur Termine — also nur im Kalender anbieten.
+    (bereich === "kalender" ? '<button class="btn icon ghost" data-act="suche-oeffnen" aria-label="Termine suchen">' + ICON.suche(19) + '</button>' : "") +
     '<button class="btn icon ghost" data-act="einstellungen" aria-label="Einstellungen">' + ICON.zahnrad(20) + '</button>' +
     '</div>' +
     (chipsZeigen ? '<div class="filters">' + chips + '</div>' : "") +
   '</div>';
 }
 
-// Am Handy: die drei Bereiche unten, mit dem Daumen erreichbar.
+// Am Handy: die drei Bereiche unten, mit dem Daumen erreichbar, und das
+// Plus schwebend darüber.
 function untenleiste(){
   const bereich = bereichVon(state.view);
   const knopf = (b, name) =>
     '<button data-act="bereich" data-b="' + b + '" aria-pressed="' + (bereich === b) + '">' +
-      ICON[b](23) + '<span>' + name + '</span></button>';
+      ICON[b](20) + '<span>' + name + '</span></button>';
   return '<nav class="untenleiste" aria-label="Bereiche">' +
     knopf("kalender", "Kalender") + knopf("aufgaben", "Aufgaben") + knopf("listen", "Listen") +
   '</nav>' +
