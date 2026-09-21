@@ -405,13 +405,6 @@ button.pill:hover{filter:brightness(1.08)}
 .sb-termin .t{flex:none;min-width:70px;font-size:20px;font-weight:600;color:#A9B3AA;font-variant-numeric:tabular-nums}
 .sb-termin .n{font-size:22px;font-weight:600}
 .sb-essen{margin-top:22px;font-size:20px;color:#A9B3AA}
-/* Nacht: fast schwarz, nur die Uhr schwach sichtbar. */
-.standby.nacht{background:#000;color:#4A4F49}
-.standby.nacht .sb-datum,.standby.nacht .sb-essen,.standby.nacht .sb-termin .t{color:#3A3E39}
-.standby.nacht .sb-termin{background:#0A0B0A;border-left-color:#2A2D29}
-.standby.nacht .sb-liste,.standby.nacht .sb-essen{display:none}
-/* Wer nachts die Tafel antippt, bekommt sie gedimmt. */
-html.nacht .shell,html.nacht .backdrop{filter:brightness(.55)}
 .zutatzeile{
   display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin-bottom:8px;
   border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
@@ -621,7 +614,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 20:55";
+const FASSUNG = "2026-09-21 21:03";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2419,10 +2412,9 @@ function essensplanAnsicht(){
 
 /* =========================================================
    Wandtafel (nur Wandtablet): alles für heute auf einen Blick.
-   Nach 5 Minuten ohne Berührung Standby, von 21 bis 6 Uhr Nacht.
+   Nach 5 Minuten ohne Berührung Standby.
    ========================================================= */
-const STANDBY_NACH = 5 * 60000, NACHT_AB = 21, NACHT_BIS = 6;
-function nachtJetzt(){ const h = new Date().getHours(); return h >= NACHT_AB || h < NACHT_BIS; }
+const STANDBY_NACH = 5 * 60000;
 function uhrText(){ return hm(new Date()); }
 function tafelDatum(d){ return WDLANG[(d.getDay()+6)%7] + ", " + d.getDate() + ". " + MONATE[d.getMonth()]; }
 
@@ -2470,7 +2462,7 @@ function standbyAnsicht(){
     .concat(occurrencesOn(addDays(heute, 1)).map(o => ({ o:o, tag:"morgen " })))
     .slice(0, 4);
   const essen = planAm(heute).map(planName);
-  return '<div class="standby' + (nachtJetzt() ? " nacht" : "") + '" data-act="standby-weg">' +
+  return '<div class="standby" data-act="standby-weg">' +
     '<div class="sb-uhr tafeluhr">' + uhrText() + '</div>' +
     '<div class="sb-datum">' + tafelDatum(jetzt) + '</div>' +
     (naechste.length ? '<div class="sb-liste">' + naechste.map(x =>
@@ -2480,8 +2472,8 @@ function standbyAnsicht(){
   '</div>';
 }
 
-// Läuft auf dem Tablet alle 15 Sekunden: Uhr nachführen (ohne Neuzeichnen),
-// Standby und Nacht umschalten.
+// Läuft auf dem Tablet alle 15 Sekunden: Uhr nachführen (ohne Neuzeichnen)
+// und nach 5 Minuten ohne Berührung in den Standby.
 let wachsperre = null;
 function wachHalten(){
   if(!state.tablet || !navigator.wakeLock || document.hidden) return;
@@ -2489,17 +2481,12 @@ function wachHalten(){
 }
 document.addEventListener("visibilitychange", function(){ if(!document.hidden) wachHalten(); });
 function tafelTakt(){
-  document.documentElement.classList.toggle("nacht", !!(state.tablet && nachtJetzt()));
   if(!state.tablet || !state.membership) return;
   $$(".tafeluhr").forEach(el => { el.textContent = uhrText(); });
   if(!state.standby && Date.now() - letzteBedienung > STANDBY_NACH){
     overlaySchliessen();                    // halbe Eingaben am Wandtablet verwerfen
     state.standby = true; state.view = "tafel";
     render();
-  }else if(state.standby){
-    // Termin vorbei, Nacht beginnt … selten genug, um einfach neu zu zeichnen.
-    const sb = $(".standby");
-    if(sb && sb.classList.contains("nacht") !== nachtJetzt()) render();
   }
 }
 
