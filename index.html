@@ -15,7 +15,7 @@
   --radius:12px;
   --shadow:0 1px 2px rgba(23,32,28,.07), 0 10px 30px -20px rgba(23,32,28,.45);
   --karte:0 1px 2px rgba(23,32,28,.05), 0 6px 16px -12px rgba(23,32,28,.30);
-  --navhoehe:48px;
+  --navhoehe:40px;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -161,6 +161,8 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
   min-width:24px;text-align:left;font-variant-numeric:tabular-nums;
 }
 .dayhead{display:flex;align-items:baseline;gap:3px;min-width:0;width:100%}
+.kw{flex:none;font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.02em;font-variant-numeric:tabular-nums;opacity:.85}
+.content.ansicht-monat{padding-left:8px;padding-right:8px}
 /* Feiertage stehen als blanker Text neben der Zahl — kein Pill,
    damit sie den Terminen keinen Platz wegnehmen. */
 .ft{
@@ -375,24 +377,29 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .topbar .filters::-webkit-scrollbar{display:none}
   .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:10px}
-  .day{min-height:66px;padding:3px 3px 5px;gap:2px}
-  .daynum{font-size:12px}
+  .content.ansicht-monat{padding-left:3px;padding-right:3px;padding-top:4px}
+  .day{min-height:64px;padding:2px 2px 3px;gap:1px}
+  .daynum{font-size:12px;padding:0 3px}
+  .kw{font-size:9px}
+  .dayhead{gap:2px}
+  .day .daylist{gap:1px}
+  .day .pill{padding:1px 3px;font-size:10.5px;line-height:1.25;gap:2px;border-radius:4px}
+  .day .pill .who{font-size:10px}
   .day .more .lbl{display:none}
   .day .more{font-size:10.5px;padding:0 2px}
   .pill{padding:2px 4px;font-size:11.5px;gap:3px}
   .pill .t{display:none}
   .untenleiste{
-    display:flex;flex:none;background:var(--surface);border-top:1px solid var(--line);
-    padding:2px 6px calc(2px + env(safe-area-inset-bottom));
+    display:flex;flex:none;gap:4px;background:var(--surface);border-top:1px solid var(--line);
+    padding:3px 6px calc(3px + env(safe-area-inset-bottom));
   }
+  /* Symbol neben der Beschriftung: die flachste Form, die noch Text trägt. */
   .untenleiste button{
-    flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:1px;
-    border:none;background:none;color:var(--muted);font-size:10.5px;font-weight:600;
-    padding:3px 0 2px;
+    flex:1 1 0;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;
+    min-height:34px;padding:0;border:none;border-radius:9px;background:none;
+    color:var(--muted);font-size:12.5px;font-weight:600;
   }
-  .untenleiste button svg{padding:2px 14px;border-radius:999px;box-sizing:content-box}
-  .untenleiste button[aria-pressed="true"]{color:var(--accent)}
-  .untenleiste button[aria-pressed="true"] svg{background:var(--accent-soft)}
+  .untenleiste button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
   .fab{
     display:flex;position:fixed;right:16px;z-index:20;
     bottom:calc(var(--navhoehe) + 12px + env(safe-area-inset-bottom));
@@ -700,6 +707,14 @@ function naechsteWiederholung(d, art){
   if(art === "monatlich")             return addMonths(d,1);
   if(art === "jaehrlich")             return addYears(d,1);
   return null;
+}
+
+// ISO-Kalenderwoche: Woche 1 enthält den ersten Donnerstag des Jahres.
+function kalenderwoche(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const jahresbeginn = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - jahresbeginn) / 86400000 + 1) / 7);
 }
 
 function datumText(ymdStr){
@@ -1414,7 +1429,7 @@ function render(){
 
   app.innerHTML =
     '<div class="shell">' + topbar() + '<div class="main">' +
-      '<div class="content">' +
+      '<div class="content ansicht-' + state.view + '">' +
         (state.view==="monat" ? monatsAnsicht()
           : state.view==="woche" ? wochenAnsicht()
           : state.view==="aufgaben" ? aufgabenAnsicht()
@@ -1595,7 +1610,7 @@ function untenleiste(){
   const bereich = bereichVon(state.view);
   const knopf = (b, name) =>
     '<button data-act="bereich" data-b="' + b + '" aria-pressed="' + (bereich === b) + '">' +
-      ICON[b](20) + '<span>' + name + '</span></button>';
+      ICON[b](18) + '<span>' + name + '</span></button>';
   return '<nav class="untenleiste" aria-label="Bereiche">' +
     knopf("kalender", "Kalender") + knopf("aufgaben", "Aufgaben") + knopf("listen", "Listen") +
   '</nav>' +
@@ -1617,7 +1632,7 @@ function monatsAnsicht(){
   const first = new Date(c.getFullYear(), c.getMonth(), 1);
   const start = mondayOf(first);
   const heute = new Date();
-  const maxProTag = window.innerWidth < 641 ? 2 : 3;
+  const maxProTag = 3;
 
   const nachTag = occurrencesNachTag(start, endOfDay(addDays(start, 41)));
   let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
@@ -1635,6 +1650,7 @@ function monatsAnsicht(){
         ' data-act="tag-detail" data-d="' + key + '" title="' + (occ.length ? occ.length + " Termine anzeigen" : "Tag öffnen") + '">' +
       '<span class="dayhead">' +
         '<span class="daynum">' + d.getDate() + '</span>' +
+        (i % 7 === 0 ? '<span class="kw">KW ' + kalenderwoche(d) + '</span>' : "") +
         (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
       '</span>' +
       '<span class="daylist">' + zeigen.map(o => pillHtml(o, false)).join("") +
