@@ -440,7 +440,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 19:04";
+const FASSUNG = "2026-09-21 19:11";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1093,6 +1093,8 @@ const ICON = {
   zahnrad:  (g) => svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle>', g),
   suche:    (g) => svg('<circle cx="10.5" cy="10.5" r="6"></circle><path d="M15 15l5 5"></path>', g),
   filter:   (g) => svg('<path d="M4 5.5h16l-6.2 7.1v5.4l-3.6 1.8v-7.2z"></path>', g),
+  vollbild:    (g) => svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path>', g),
+  vollbildAus: (g) => svg('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"></path>', g),
   links:    (g) => svg('<path d="M14.5 6l-6 6 6 6"></path>', g),
   rechts:   (g) => svg('<path d="M9.5 6l6 6-6 6"></path>', g)
 };
@@ -1524,6 +1526,24 @@ function viewSetup(){
   '</div></div>';
 }
 
+// Vollbild — samt Schreibweise älterer Browser mit webkit-Vorsilbe.
+function vollbildMoeglich(){ return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled); }
+function imVollbild(){ return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+async function vollbildUmschalten(){
+  try{
+    if(imVollbild()){
+      await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    }else{
+      const el = document.documentElement;
+      await (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    }
+  }catch(err){
+    setToast("Vollbild ist auf diesem Gerät gerade nicht möglich.");
+  }
+}
+document.addEventListener("fullscreenchange", function(){ renderImHintergrund(); });
+document.addEventListener("webkitfullscreenchange", function(){ renderImHintergrund(); });
+
 // Kalender, Aufgaben, Listen sind die Hauptbereiche; Monat/Woche/Tag
 // gehören nur zum Kalender.
 function bereichVon(view){ return view === "aufgaben" || view === "listen" ? view : "kalender"; }
@@ -1604,6 +1624,10 @@ function topbar(){
       : "") +
     // Die Suche durchsucht nur Termine — also nur im Kalender anbieten.
     (bereich === "kalender" ? '<button class="btn icon ghost" data-act="suche-oeffnen" aria-label="Termine suchen">' + ICON.suche(19) + '</button>' : "") +
+    (vollbildMoeglich()
+      ? '<button class="btn icon ghost" data-act="vollbild" aria-label="' + (imVollbild() ? "Vollbild beenden" : "Vollbild") + '">' +
+          (imVollbild() ? ICON.vollbildAus(19) : ICON.vollbild(19)) + '</button>'
+      : "") +
     '<button class="btn icon ghost" data-act="einstellungen" aria-label="Einstellungen">' + ICON.zahnrad(20) + '</button>' +
     '</div>' +
     (chipsZeigen ? '<div class="filters">' + chips + '</div>' : "") +
@@ -2489,6 +2513,7 @@ async function aktion(act, el){
       render();
       return sicherstellenGeladen();
     }
+    case "vollbild": return vollbildUmschalten();
     case "filter-umschalten":
       state.filterOffen = !state.filterOffen; return render();
     case "tag-neu": state.dialog = neuerDialog(el.dataset.d); overlayOeffnen(); return render();
