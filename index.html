@@ -378,7 +378,7 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .more{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .content{padding:10px}
   .content.ansicht-monat{padding-left:3px;padding-right:3px;padding-top:4px}
-  .day{min-height:64px;padding:2px 2px 3px;gap:1px}
+  .day{min-height:77px;padding:2px 2px 3px;gap:1px}
   .daynum{font-size:12px;padding:0 3px}
   .kw{font-size:8.5px;letter-spacing:0}
   .dayhead{gap:1px;overflow:hidden}
@@ -1634,7 +1634,9 @@ function monatsAnsicht(){
   const first = new Date(c.getFullYear(), c.getMonth(), 1);
   const start = mondayOf(first);
   const heute = new Date();
-  const maxProTag = 3;
+  // Am Handy sind die Pillen schmal genug für vier; am Wandtablet würde
+  // eine höhere Zelle den Monat über den Bildschirmrand schieben.
+  const maxProTag = window.innerWidth < 641 ? 4 : 3;
 
   const nachTag = occurrencesNachTag(start, endOfDay(addDays(start, 41)));
   let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
