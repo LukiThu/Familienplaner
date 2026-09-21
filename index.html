@@ -72,7 +72,7 @@ button{cursor:pointer}
 .field{display:flex;flex-direction:column;gap:6px}
 [hidden]{display:none !important}
 .field > label{font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
-input[type=text],input[type=number],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
+input[type=text],input[type=number],input[type=search],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
   width:100%;min-height:42px;padding:9px 11px;border-radius:8px;
   border:1px solid var(--line-strong);background:var(--surface);
 }
@@ -296,6 +296,10 @@ button.pill:hover{filter:brightness(1.08)}
 .ampel button[aria-pressed="true"][data-s="leer"]{background:var(--danger);border-color:var(--danger);color:#fff}
 .vorrat.s-leer{border-left:5px solid var(--danger)}
 .vorrat.s-knapp{border-left:5px solid var(--knapp)}
+.kueche-suche{width:100%}
+.zutatrow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.zutatrow .zu-menge{flex:0 0 27%;min-width:0}
+.zutatrow .zu-name{flex:1 1 auto;min-width:0}
 .gerichte{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
 .gericht{
   display:flex;flex-direction:column;gap:6px;text-align:left;padding:12px 14px;
@@ -479,7 +483,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 19:43";
+const FASSUNG = "2026-09-21 20:07";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -510,6 +514,7 @@ const WDH    = [
 ];
 
 const $ = (s,r)=> (r||document).querySelector(s);
+const $$ = (s,r)=> Array.from((r||document).querySelectorAll(s));
 const esc = s => String(s==null?"":s)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
   .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
@@ -548,7 +553,7 @@ const state = {
   tasks:[], erledigt:[], aufgabe:null,
   lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   filterOffen:false,
-  pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[],
+  pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -1213,10 +1218,26 @@ function eintraegeVon(liste){
   return state.listItems.filter(e => e.list_id === liste.id);
 }
 // "2 kg Äpfel", "500g Mehl", "3x Joghurt" → "äpfel", "mehl", "joghurt"
+// Vergleichsschlüssel für Namen: „2 große Zwiebeln“, „Zwiebel“ und
+// „zwiebeln“ ergeben dasselbe. Mengen und Beiwörter vorne fallen weg,
+// Umlaute und typische Mehrzahl-Endungen werden ausgeglichen.
+const MENGENWORT = /^(\d+([.,\/]\d+)?|[½¼¾⅓⅔]|x|stk|stuck|g|gr|kg|l|ml|cl|el|tl|pkg|pck|packung(en)?|dose(n)?|bund|becher|glas(er)?|flasche(n)?|prise(n)?|handvoll|scheibe(n)?|zehe(n)?|ein(e|en|er)?|zwei|drei|vier|etwas|wenig|viel|(mittel)?gross(e|er|es|en)?|klein(e|er|es|en)?|frisch(e|er|es|en)?|reif(e|er|es|en)?|halb(e|er|es|en)?|ganz(e|er|es|en)?|bio)\.?$/;
+function wortstamm(w){
+  if(w === "eier") return "ei";           // zu kurz für die Regel unten
+  for(let i = 0; i < 2; i++){
+    const k = w.replace(/(en|er|n|e|s)$/, "");
+    if(k === w || k.length < 3) break;
+    w = k;
+  }
+  return w;
+}
 function eintragKern(text){
-  return String(text || "").toLowerCase()
-    .replace(/^\s*[\d.,]+\s*(x|stk|stück|g|kg|l|ml|pkg|packung|packungen|dose|dosen|bund|becher|glas)?\.?\s+/i, "")
-    .trim();
+  const woerter = String(text || "").toLowerCase()
+    .replace(/ä/g, "a").replace(/ö/g, "o").replace(/ü/g, "u").replace(/ß/g, "ss")
+    .replace(/(\d)([a-z])/g, "$1 $2")       // „500g“ → „500 g“
+    .split(/[\s,;()]+/).filter(Boolean);
+  while(woerter.length > 1 && MENGENWORT.test(woerter[0])) woerter.shift();
+  return woerter.map(wortstamm).join(" ");
 }
 // Den Ladenbereich übernehmen, den derselbe Artikel beim letzten Mal hatte.
 function bereichRaten(text){
@@ -1243,9 +1264,14 @@ function vorratZu(text){
   const k = eintragKern(text);
   return k ? (state.pantry.find(p => eintragKern(p.name) === k) || null) : null;
 }
+function zutatenVon(g){
+  return (g.zutaten || []).map(z => typeof z === "string" ? { menge:"", name:z } : { menge:z.menge || "", name:z.name || "" })
+    .filter(z => z.name.trim());
+}
+function zutatText(z){ return (z.menge ? z.menge + " " : "") + z.name; }
 // Fehlt etwas? Nur Vorräte zählen — Frisches wird ohnehin frisch gekauft.
 function zutatenStand(g){
-  const vorraete = (g.zutaten || []).map(vorratZu).filter(Boolean);
+  const vorraete = zutatenVon(g).map(z => vorratZu(z.name)).filter(Boolean);
   return {
     leer:  vorraete.filter(p => p.status === "leer"),
     knapp: vorraete.filter(p => p.status === "knapp"),
@@ -1975,10 +2001,19 @@ function vorratZeile(p, liste){
     '<div class="ampel" role="group" aria-label="Vorrat">' + ampel + '</div>' +
   '</div>';
 }
+// Sucht auch mitten im Wort und ohne Rücksicht auf Umlaute.
+function suchText(t){
+  return String(t || "").toLowerCase().replace(/ä/g, "a").replace(/ö/g, "o").replace(/ü/g, "u").replace(/ß/g, "ss");
+}
+function kuecheSuchfeld(platzhalter){
+  return '<input id="kueche-suche" class="kueche-suche" type="search" value="' + esc(state.kuecheSuche) +
+    '" placeholder="' + platzhalter + '" autocomplete="off" aria-label="Suchen">';
+}
 function lagerAnsicht(){
   const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
-  const zeigen = state.pantry.filter(p => !nurKnapp || p.status !== "genug")
+  const such = suchText(state.kuecheSuche.trim());
+  const zeigen = state.pantry.filter(p => (!nurKnapp || p.status !== "genug") && (!such || suchText(p.name).indexOf(such) >= 0))
     .slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
   const fehlend = state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
   const bereiche = ladenbereiche();
@@ -1987,7 +2022,7 @@ function lagerAnsicht(){
   if(!state.pantry.length){
     inhalt = '<p class="empty">Noch nichts im Lager. Trag ein, was ihr üblicherweise daheim habt — Nudeln, Reis, Mehl, Konserven … Frisches wie Milch oder Gemüse braucht es hier nicht.</p>';
   }else if(!zeigen.length){
-    inhalt = '<p class="empty">Nichts knapp, nichts leer.</p>';
+    inhalt = '<p class="empty">' + (such ? "Nichts gefunden." : "Nichts knapp, nichts leer.") + '</p>';
   }else{
     bereiche.concat([""]).forEach(function(b){
       const drin = zeigen.filter(p => b ? p.bereich === b : bereiche.indexOf(p.bereich) < 0);
@@ -2003,6 +2038,7 @@ function lagerAnsicht(){
       '<span class="spacer"></span>' +
       (fehlend ? '<button class="btn" data-act="lager-einkaufen">' + fehlend + ' auf die Einkaufsliste</button>' : "") +
     '</div>' +
+    (state.pantry.length > 8 ? kuecheSuchfeld("Im Lager suchen") : "") +
     '<form class="eintrag-form" data-act="vorrat-neu">' +
       '<input id="vorrat-text" type="text" placeholder="Neuer Vorrat" autocomplete="off" enterkeyhint="done">' +
       '<select id="vorrat-bereich" aria-label="Ladenbereich"><option value="">Bereich …</option>' +
@@ -2017,6 +2053,8 @@ function lagerAnsicht(){
 const GERICHT_FILTER = [["haus","Alles im Haus"],["veg","Vegetarisch"],["kinder","Mögen die Kinder"],["schnell","Bis 30 Min."]];
 function gerichtPasst(g){
   const f = state.gerichtFilter;
+  const such = suchText(state.kuecheSuche.trim());
+  if(such && suchText(g.name + " " + zutatenVon(g).map(z => z.name).join(" ")).indexOf(such) < 0) return false;
   if(f.indexOf("haus") >= 0 && !imHaus(g)) return false;
   if(f.indexOf("veg") >= 0 && !g.vegetarisch) return false;
   if(f.indexOf("kinder") >= 0 && !g.kinder) return false;
@@ -2032,7 +2070,7 @@ function gerichtKarte(g){
   return '<button class="gericht" data-act="gericht-oeffnen" data-id="' + g.id + '">' +
     '<h3>' + esc(g.name) + '</h3>' +
     (marken ? '<span class="marken">' + marken + '</span>' : "") +
-    ((g.zutaten || []).length ? '<span class="zutaten">' + esc(g.zutaten.join(" · ")) + '</span>' : "") +
+    (zutatenVon(g).length ? '<span class="zutaten">' + esc(zutatenVon(g).map(zutatText).join(" · ")) + '</span>' : "") +
     (st.leer.length ? '<span class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</span>' : "") +
     (st.knapp.length ? '<span class="knapp">Knapp: ' + esc(st.knapp.map(p => p.name).join(", ")) + '</span>' : "") +
   '</button>';
@@ -2043,6 +2081,7 @@ function gerichteAnsicht(){
     '<button class="fchip" data-act="gericht-filter" data-f="' + f[0] + '" aria-pressed="' + (state.gerichtFilter.indexOf(f[0]) >= 0) + '">' + f[1] + '</button>').join("");
   return '<div class="agenda" style="max-width:980px">' +
     '<div class="kuechenleiste">' + chips + '</div>' +
+    (state.dishes.length > 6 ? kuecheSuchfeld("Gericht oder Zutat suchen") : "") +
     (!state.dishes.length
       ? '<p class="empty">Noch keine Gerichte. Mit + legt ihr eure Sammlung an — die Zutaten eine pro Zeile.</p>'
       : !zeigen.length
@@ -2468,14 +2507,28 @@ function dialogVorrat(){
 }
 
 function neuesGericht(g){
-  return g ? { id:g.id, name:g.name, zutaten:(g.zutaten || []).join("\n"), dauer_min: g.dauer_min == null ? "" : String(g.dauer_min),
+  return g ? { id:g.id, name:g.name, zutaten:zutatenVon(g), dauer_min: g.dauer_min == null ? "" : String(g.dauer_min),
                vegetarisch:!!g.vegetarisch, kinder:!!g.kinder, notiz:g.notiz || "" }
-           : { id:null, name:"", zutaten:"", dauer_min:"", vegetarisch:false, kinder:false, notiz:"" };
+           : { id:null, name:"", zutaten:[], dauer_min:"", vegetarisch:false, kinder:false, notiz:"" };
+}
+function zutatZeile(z){
+  return '<div class="zutatrow">' +
+    '<input class="zu-menge" type="text" value="' + esc(z.menge) + '" placeholder="Menge" aria-label="Menge" autocomplete="off">' +
+    '<input class="zu-name" type="text" value="' + esc(z.name) + '" placeholder="Zutat" aria-label="Zutat" list="lager-namen" autocomplete="off" enterkeyhint="next">' +
+    '<button class="btn icon ghost" type="button" data-act="zutat-weg" aria-label="Zutat entfernen">&#10005;</button>' +
+  '</div>';
+}
+function zutatDazu(){
+  const box = $("#zutatenliste"); if(!box) return;
+  box.insertAdjacentHTML("beforeend", zutatZeile({ menge:"", name:"" }));
+  box.lastElementChild.querySelector(".zu-menge").focus();
 }
 function gerichtLesen(){
   const g = state.gericht; if(!g) return;
   if($("#ge-name"))    g.name = $("#ge-name").value;
-  if($("#ge-zutaten")) g.zutaten = $("#ge-zutaten").value;
+  if($("#zutatenliste")) g.zutaten = $$("#zutatenliste .zutatrow").map(r => ({
+    menge: r.querySelector(".zu-menge").value.trim(), name: r.querySelector(".zu-name").value.trim()
+  }));
   if($("#ge-dauer"))   g.dauer_min = $("#ge-dauer").value;
   if($("#ge-veg"))     g.vegetarisch = $("#ge-veg").checked;
   if($("#ge-kinder"))  g.kinder = $("#ge-kinder").checked;
@@ -2486,9 +2539,11 @@ function dialogGericht(){
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="gericht-speichern">' +
     '<h2>' + (g.id ? "Gericht bearbeiten" : "Neues Gericht") + '</h2>' +
     '<div class="field"><label for="ge-name">Name</label><input id="ge-name" type="text" value="' + esc(g.name) + '" required></div>' +
-    '<div class="field"><label for="ge-zutaten">Zutaten</label>' +
-      '<textarea id="ge-zutaten" rows="6" placeholder="Nudeln&#10;2 Dosen Tomaten&#10;Zwiebel">' + esc(g.zutaten) + '</textarea>' +
-      '<span class="hint">Eine pro Zeile. Mengen davor sind erlaubt — gezählt wird der Name.</span></div>' +
+    '<div class="field"><label>Zutaten</label>' +
+      '<div id="zutatenliste">' + (g.zutaten.length ? g.zutaten : [{ menge:"", name:"" }]).map(zutatZeile).join("") + '</div>' +
+      '<button class="btn" type="button" data-act="zutat-neu" style="align-self:flex-start">+ Zutat</button>' +
+      '<datalist id="lager-namen">' + state.pantry.map(p => '<option value="' + esc(p.name) + '">').join("") + '</datalist>' +
+      '<span class="hint">Der Name wird mit dem Lager verglichen — am besten aus den Vorschlägen wählen. Einzahl und Mehrzahl sind egal.</span></div>' +
     '<div class="field"><label for="ge-dauer">Dauer in Minuten</label><input id="ge-dauer" type="number" min="1" max="600" inputmode="numeric" value="' + esc(g.dauer_min) + '"></div>' +
     '<label class="check"><input id="ge-veg" type="checkbox"' + (g.vegetarisch ? " checked" : "") + '> Vegetarisch</label>' +
     '<label class="check"><input id="ge-kinder" type="checkbox"' + (g.kinder ? " checked" : "") + '> Die Kinder mögen es</label>' +
@@ -2752,6 +2807,7 @@ async function aktion(act, el){
       state.view = el.dataset.v; localStorage.setItem("fp.view", state.view);
       if(["monat","woche","tag"].indexOf(state.view) >= 0) localStorage.setItem("fp.kalenderView", state.view);
       if(["lager","gerichte"].indexOf(state.view) >= 0) localStorage.setItem("fp.kuecheView", state.view);
+      state.kuecheSuche = "";
       return render();
     case "prev":
     case "next": {
@@ -2900,6 +2956,13 @@ async function aktion(act, el){
       state.gericht = neuesGericht(g); overlayOeffnen(); return render();
     }
     case "gericht-loeschen": return gerichtLoeschen();
+    case "zutat-neu": return zutatDazu();
+    case "zutat-weg": {
+      const r = el.closest(".zutatrow"), box = $("#zutatenliste");
+      if(r) r.remove();
+      if(box && !box.children.length) zutatDazu();
+      return;
+    }
     case "bereich-hoch": { const r = el.closest(".bereichrow"); if(r && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); return; }
     case "bereich-runter": { const r = el.closest(".bereichrow"); if(r && r.nextElementSibling) r.parentNode.insertBefore(r.nextElementSibling, r); return; }
     case "bereich-weg": { const r = el.closest(".bereichrow"); if(r) r.remove(); return; }
@@ -3076,6 +3139,7 @@ document.addEventListener("touchend", function(e){
 }, { passive:true });
 
 document.addEventListener("input", function(e){
+  if(e.target && e.target.id === "kueche-suche"){ state.kuecheSuche = e.target.value; return render(); }
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
     // Bereich vom letzten Mal vorschlagen — solange niemand von Hand gewählt hat.
@@ -3137,6 +3201,13 @@ document.addEventListener("change", async function(e){
 
 document.addEventListener("keydown", function(e){
   if(e.key === "Escape" && overlayOffen()){ obersteSchliessen(); }
+  // Enter in einer Zutat: nächste Zeile statt Speichern.
+  if(e.key === "Enter" && e.target && e.target.classList && e.target.classList.contains("zu-name")){
+    e.preventDefault();
+    const r = e.target.closest(".zutatrow");
+    if(r && r.nextElementSibling) r.nextElementSibling.querySelector(".zu-menge").focus();
+    else zutatDazu();
+  }
 });
 
 async function anmelden(){
@@ -3600,7 +3671,7 @@ async function gerichtSpeichern(){
   const dauer = parseInt(g.dauer_min, 10);
   const zeile = {
     name:name,
-    zutaten: g.zutaten.split("\n").map(z => z.trim()).filter(Boolean),
+    zutaten: g.zutaten.filter(z => z.name),
     dauer_min: dauer > 0 ? dauer : null,
     vegetarisch: !!g.vegetarisch, kinder: !!g.kinder, notiz: g.notiz.trim()
   };
