@@ -297,6 +297,39 @@ button.pill:hover{filter:brightness(1.08)}
 .vorrat.s-leer{border-left:5px solid var(--danger)}
 .vorrat.s-knapp{border-left:5px solid var(--knapp)}
 .kueche-suche{width:100%}
+.vorschlag-anker{position:relative;flex:1 1 auto;min-width:0;display:flex}
+.vorschlag-anker input{flex:1 1 auto;min-width:0;width:100%}
+.vorschlaege{
+  position:absolute;left:0;right:0;top:100%;z-index:20;margin-top:3px;
+  display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:10px;box-shadow:var(--shadow);overflow:hidden;
+}
+.vorschlaege button{
+  text-align:left;padding:10px 12px;border:none;border-bottom:1px solid var(--line);
+  background:none;font:inherit;color:inherit;cursor:pointer;
+}
+.vorschlaege button:last-child{border-bottom:none}
+.vorschlaege button:hover{background:var(--surface-3)}
+.zutatzeile{
+  display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin-bottom:8px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
+}
+.zutatzeile .kopf{display:flex;align-items:center;gap:8px}
+.zutatzeile .kopf .zname{
+  flex:1 1 auto;min-width:0;text-align:left;border:none;background:none;padding:4px 0;font:inherit;color:inherit;cursor:pointer;
+  display:flex;flex-direction:column;gap:1px;
+}
+.zutatzeile .zname b{font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zutatzeile .zname small{font-size:12.5px;color:var(--knapp)}
+.zutatzeile .ampel{margin-right:0}
+.zutatzeile .kopf .btn{min-height:34px;height:34px;padding:0 12px;font-size:13.5px}
+.zutatzeile .kein-lager{font-size:13px;color:var(--muted);white-space:nowrap}
+.zutatzeile .gerichtchips{display:flex;gap:5px;flex-wrap:wrap}
+.zutatzeile .gerichtchips button{
+  font-size:12.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface-3);color:inherit;cursor:pointer;
+}
+.zutatzeile .gerichtchips .ohne{font-size:12.5px;color:var(--muted);font-style:italic}
 .zutatrow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
 .zutatrow .zu-menge{flex:0 0 27%;min-width:0}
 .zutatrow .zu-name{flex:1 1 auto;min-width:0}
@@ -483,7 +516,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 20:07";
+const FASSUNG = "2026-09-21 20:20";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -554,6 +587,7 @@ const state = {
   lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   filterOffen:false,
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
+  zutatFilter:"", zutatDialog:null,
   view: localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat"),
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -1528,6 +1562,7 @@ function renderImHintergrund(){
   if(state.eintrag && $("#ein-text")) eintragLesen();
   if(state.vorrat && $("#vo-name")) vorratLesen();
   if(state.gericht && $("#ge-name")) gerichtLesen();
+  if(state.zutatDialog && $("#zu-ziel")) state.zutatDialog.ziel = $("#zu-ziel").value;
   render();
 }
 
@@ -1554,6 +1589,7 @@ function render(){
           : state.view==="listen" ? listenAnsicht()
           : state.view==="lager" ? lagerAnsicht()
           : state.view==="gerichte" ? gerichteAnsicht()
+          : state.view==="zutaten" ? zutatenAnsicht()
           : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div>' + untenleiste() + '</div>' +
@@ -1562,6 +1598,7 @@ function render(){
     (state.listeDialog ? dialogListe() : "") +
     (state.vorrat ? dialogVorrat() : "") +
     (state.gericht ? dialogGericht() : "") +
+    (state.zutatDialog ? dialogZutat() : "") +
     (state.suche ? dialogSuche() : "") +
     (state.tagDetail ? dialogTag() : "") +
     (state.vorlagenListe ? dialogVorlagen() : "") +
@@ -1683,7 +1720,7 @@ document.addEventListener("webkitfullscreenchange", function(){ renderImHintergr
 // Kalender, Aufgaben, Listen sind die Hauptbereiche; Monat/Woche/Tag
 // gehören nur zum Kalender.
 function bereichVon(view){
-  if(view === "lager" || view === "gerichte") return "kueche";
+  if(view === "lager" || view === "gerichte" || view === "zutaten") return "kueche";
   return view === "aufgaben" || view === "listen" ? view : "kalender";
 }
 
@@ -1745,6 +1782,7 @@ function topbar(){
         ? '<div class="viewtabs">' +
             '<button data-act="view" data-v="lager" aria-pressed="' + (state.view==="lager") + '">Lager</button>' +
             '<button data-act="view" data-v="gerichte" aria-pressed="' + (state.view==="gerichte") + '">Gerichte</button>' +
+            '<button data-act="view" data-v="zutaten" aria-pressed="' + (state.view==="zutaten") + '">Zutaten</button>' +
           '</div>'
         : "") +
     '</div>' +
@@ -2087,6 +2125,66 @@ function gerichteAnsicht(){
       : !zeigen.length
         ? '<p class="empty">Kein Gericht passt zu diesen Filtern.</p>'
         : '<div class="gerichte">' + zeigen.map(gerichtKarte).join("") + '</div>') +
+  '</div>';
+}
+
+/* ---------- Küche: Zutaten-Übersicht ---------- */
+// Jede Zutat einmal — gleich Erkanntes (Zwiebel/Zwiebeln) in einer Zeile.
+function zutatenUebersicht(){
+  const nach = {};
+  const eintrag = (name) => {
+    const k = eintragKern(name); if(!k) return null;
+    if(!nach[k]) nach[k] = { key:k, namen:{}, gerichte:[], vorrat:null };
+    return nach[k];
+  };
+  state.dishes.forEach(g => zutatenVon(g).forEach(z => {
+    const e = eintrag(z.name); if(!e) return;
+    e.namen[z.name] = (e.namen[z.name] || 0) + 1;
+    if(e.gerichte.indexOf(g) < 0) e.gerichte.push(g);
+  }));
+  state.pantry.forEach(p => { const e = eintrag(p.name); if(e) e.vorrat = p; });
+  return Object.keys(nach).map(k => {
+    const e = nach[k];
+    const oft = Object.keys(e.namen).sort((a, b) => e.namen[b] - e.namen[a]);
+    e.name = e.vorrat ? e.vorrat.name : oft[0];
+    e.auch = oft.filter(n => n !== e.name);
+    e.gerichte.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return e;
+  }).sort((a, b) => a.name.localeCompare(b.name, "de"));
+}
+const ZUTAT_FILTER = [["ohneLager","Nicht im Lager"],["ohneGericht","In keinem Gericht"],["fehlt","Fehlt gerade"]];
+function zutatenAnsicht(){
+  const alle = zutatenUebersicht();
+  const such = suchText(state.kuecheSuche.trim()), f = state.zutatFilter;
+  const zeigen = alle.filter(e =>
+    (!such || suchText([e.name].concat(e.auch).join(" ")).indexOf(such) >= 0) &&
+    (f !== "ohneLager" || !e.vorrat) &&
+    (f !== "ohneGericht" || !e.gerichte.length) &&
+    (f !== "fehlt" || (e.vorrat && e.vorrat.status === "leer")));
+  const zeile = e =>
+    '<div class="zutatzeile">' +
+      '<div class="kopf">' +
+        '<button class="zname" data-act="zutat-oeffnen" data-key="' + esc(e.key) + '"><b>' + esc(e.name) + '</b>' +
+          (e.auch.length ? '<small>auch: ' + esc(e.auch.join(", ")) + '</small>' : "") + '</button>' +
+        (e.vorrat
+          ? '<div class="ampel" role="group" aria-label="Vorrat">' + AMPEL.map(a =>
+              '<button type="button" data-act="vorrat-status" data-id="' + e.vorrat.id + '" data-s="' + a[0] + '" aria-pressed="' + (e.vorrat.status === a[0]) + '">' + a[1] + '</button>').join("") + '</div>'
+          : '<button class="btn" data-act="zutat-ins-lager" data-name="' + esc(e.name) + '">ins Lager</button>') +
+      '</div>' +
+      '<div class="gerichtchips">' +
+        (e.gerichte.length
+          ? e.gerichte.map(g => '<button type="button" data-act="gericht-oeffnen" data-id="' + g.id + '">' + esc(g.name) + '</button>').join("")
+          : '<span class="ohne">in keinem Gericht</span>') +
+      '</div>' +
+    '</div>';
+  return '<div class="agenda" style="max-width:720px">' +
+    '<div class="kuechenleiste">' + ZUTAT_FILTER.map(x =>
+      '<button class="fchip" data-act="zutat-filter" data-f="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>').join("") + '</div>' +
+    (alle.length > 8 ? kuecheSuchfeld("Zutat suchen") : "") +
+    (!alle.length ? '<p class="empty">Noch keine Zutaten — sie kommen aus den Gerichten und dem Lager.</p>'
+      : !zeigen.length ? '<p class="empty">Nichts gefunden.</p>'
+      : zeigen.map(zeile).join("")) +
+    (alle.length ? '<span class="hint">Namen antippen, um eine Schreibweise zu vereinheitlichen oder zwei Zutaten zusammenzuführen.</span>' : "") +
   '</div>';
 }
 
@@ -2514,10 +2612,39 @@ function neuesGericht(g){
 function zutatZeile(z){
   return '<div class="zutatrow">' +
     '<input class="zu-menge" type="text" value="' + esc(z.menge) + '" placeholder="Menge" aria-label="Menge" autocomplete="off">' +
-    '<input class="zu-name" type="text" value="' + esc(z.name) + '" placeholder="Zutat" aria-label="Zutat" list="lager-namen" autocomplete="off" enterkeyhint="next">' +
+    '<span class="vorschlag-anker"><input class="zu-name" data-vorschlag type="text" value="' + esc(z.name) + '" placeholder="Zutat" aria-label="Zutat" autocomplete="off" enterkeyhint="next"></span>' +
     '<button class="btn icon ghost" type="button" data-act="zutat-weg" aria-label="Zutat entfernen">&#10005;</button>' +
   '</div>';
 }
+// Alle bekannten Namen: erst das Lager, dann die Zutaten der Gerichte —
+// je Zutat nur eine Schreibweise.
+function bekannteNamen(){
+  const gesehen = {}, namen = [];
+  state.pantry.map(p => p.name)
+    .concat(...state.dishes.map(g => zutatenVon(g).map(z => z.name)))
+    .forEach(n => { const k = eintragKern(n); if(k && !gesehen[k]){ gesehen[k] = true; namen.push(n); } });
+  return namen;
+}
+function namenVorschlaege(eingabe){
+  const such = suchText(eingabe.trim());
+  if(!such) return [];
+  return bekannteNamen()
+    .filter(n => suchText(n).indexOf(such) >= 0 && suchText(n) !== such)
+    .sort((a, b) => (suchText(a).indexOf(such) === 0 ? 0 : 1) - (suchText(b).indexOf(such) === 0 ? 0 : 1) || a.localeCompare(b, "de"))
+    .slice(0, 6);
+}
+// Nur das Kästchen unter dem Feld wird neu gebaut — kein render(),
+// sonst verliert das Handy die Tastatur.
+function vorschlaegeZeigen(feld){
+  vorschlaegeWeg();
+  const anker = feld.closest(".vorschlag-anker"); if(!anker) return;
+  const liste = namenVorschlaege(feld.value);
+  if(!liste.length) return;
+  anker.insertAdjacentHTML("beforeend", '<div class="vorschlaege" role="listbox">' +
+    liste.map(n => '<button type="button" data-act="vorschlag" data-name="' + esc(n) + '">' + esc(n) + '</button>').join("") + '</div>');
+}
+function vorschlaegeWeg(){ $$(".vorschlaege").forEach(b => b.remove()); }
+
 function zutatDazu(){
   const box = $("#zutatenliste"); if(!box) return;
   box.insertAdjacentHTML("beforeend", zutatZeile({ menge:"", name:"" }));
@@ -2542,7 +2669,6 @@ function dialogGericht(){
     '<div class="field"><label>Zutaten</label>' +
       '<div id="zutatenliste">' + (g.zutaten.length ? g.zutaten : [{ menge:"", name:"" }]).map(zutatZeile).join("") + '</div>' +
       '<button class="btn" type="button" data-act="zutat-neu" style="align-self:flex-start">+ Zutat</button>' +
-      '<datalist id="lager-namen">' + state.pantry.map(p => '<option value="' + esc(p.name) + '">').join("") + '</datalist>' +
       '<span class="hint">Der Name wird mit dem Lager verglichen — am besten aus den Vorschlägen wählen. Einzahl und Mehrzahl sind egal.</span></div>' +
     '<div class="field"><label for="ge-dauer">Dauer in Minuten</label><input id="ge-dauer" type="number" min="1" max="600" inputmode="numeric" value="' + esc(g.dauer_min) + '"></div>' +
     '<label class="check"><input id="ge-veg" type="checkbox"' + (g.vegetarisch ? " checked" : "") + '> Vegetarisch</label>' +
@@ -2553,6 +2679,27 @@ function dialogGericht(){
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
+function dialogZutat(){
+  const z = state.zutatDialog;
+  const e = zutatenUebersicht().find(x => x.key === z.key);
+  if(!e) return "";
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="zutat-speichern">' +
+    '<h2>Zutat</h2>' +
+    '<p class="hint" style="margin:0">' +
+      (e.auch.length ? 'Geschrieben als: ' + esc([e.name].concat(e.auch).join(", ")) + '<br>' : "") +
+      (e.gerichte.length ? 'In ' + e.gerichte.length + (e.gerichte.length === 1 ? ' Gericht' : ' Gerichten') : 'In keinem Gericht') +
+      (e.vorrat ? ' · im Lager' : "") + '</p>' +
+    '<div class="field"><label for="zu-ziel">Heißt künftig</label>' +
+      '<span class="vorschlag-anker"><input id="zu-ziel" data-vorschlag type="text" value="' + esc(z.ziel) + '" autocomplete="off" required></span>' +
+      '<span class="hint">Alle Gerichte werden angepasst. Wählst du eine andere vorhandene Zutat, werden beide zusammengeführt.</span></div>' +
+    '<div class="actions">' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Übernehmen</button>' +
     '</div>' +
   '</form></div>';
 }
@@ -2723,7 +2870,7 @@ function overlayChronikLoesen(){
 function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
             state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe ||
-            state.eintrag || state.listeDialog || state.vorrat || state.gericht);
+            state.eintrag || state.listeDialog || state.vorrat || state.gericht || state.zutatDialog);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
 function chronikPruefen(){
@@ -2739,6 +2886,7 @@ function obersteSchliessen(){
   else if(state.eintrag)       state.eintrag = null;
   else if(state.vorrat)        state.vorrat = null;
   else if(state.gericht)       state.gericht = null;
+  else if(state.zutatDialog)   state.zutatDialog = null;
   else if(state.listeDialog)   state.listeDialog = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
@@ -2751,7 +2899,7 @@ function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
-  state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null;
+  state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   overlayChronikLoesen();
   render();
 }
@@ -2762,7 +2910,7 @@ window.addEventListener("popstate", function(){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
-    state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null;
+    state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
     render();
   }
 });
@@ -2806,7 +2954,7 @@ async function aktion(act, el){
     case "view":
       state.view = el.dataset.v; localStorage.setItem("fp.view", state.view);
       if(["monat","woche","tag"].indexOf(state.view) >= 0) localStorage.setItem("fp.kalenderView", state.view);
-      if(["lager","gerichte"].indexOf(state.view) >= 0) localStorage.setItem("fp.kuecheView", state.view);
+      if(["lager","gerichte","zutaten"].indexOf(state.view) >= 0) localStorage.setItem("fp.kuecheView", state.view);
       state.kuecheSuche = "";
       return render();
     case "prev":
@@ -2848,7 +2996,8 @@ async function aktion(act, el){
         state.view = localStorage.getItem("fp.kalenderView") || "monat";
         if(["monat","woche","tag"].indexOf(state.view) < 0) state.view = "monat";
       }else if(b === "kueche"){
-        state.view = localStorage.getItem("fp.kuecheView") === "gerichte" ? "gerichte" : "lager";
+        const kv = localStorage.getItem("fp.kuecheView");
+        state.view = kv === "gerichte" || kv === "zutaten" ? kv : "lager";
       }else{
         state.view = b;
       }
@@ -2956,7 +3105,18 @@ async function aktion(act, el){
       state.gericht = neuesGericht(g); overlayOeffnen(); return render();
     }
     case "gericht-loeschen": return gerichtLoeschen();
+    case "zutat-filter": state.zutatFilter = state.zutatFilter === el.dataset.f ? "" : el.dataset.f; return render();
+    case "zutat-ins-lager": return zutatInsLager(el.dataset.name);
+    case "zutat-oeffnen": {
+      const e = zutatenUebersicht().find(x => x.key === el.dataset.key); if(!e) return;
+      state.zutatDialog = { key:e.key, ziel:e.name }; overlayOeffnen(); return render();
+    }
     case "zutat-neu": return zutatDazu();
+    case "vorschlag": {
+      const feld = el.closest(".vorschlag-anker").querySelector("input");
+      feld.value = el.dataset.name; vorschlaegeWeg(); feld.focus();
+      return;
+    }
     case "zutat-weg": {
       const r = el.closest(".zutatrow"), box = $("#zutatenliste");
       if(r) r.remove();
@@ -3041,6 +3201,7 @@ document.addEventListener("submit", async function(e){
     if(act === "vorrat-neu")        return await vorratSchnell();
     if(act === "vorrat-speichern")  return await vorratSpeichern();
     if(act === "gericht-speichern") return await gerichtSpeichern();
+    if(act === "zutat-speichern")   return await zutatZusammenfuehren();
     if(act === "liste-speichern")   return await listeSpeichern();
     if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
@@ -3140,6 +3301,7 @@ document.addEventListener("touchend", function(e){
 
 document.addEventListener("input", function(e){
   if(e.target && e.target.id === "kueche-suche"){ state.kuecheSuche = e.target.value; return render(); }
+  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag")) return vorschlaegeZeigen(e.target);
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
     // Bereich vom letzten Mal vorschlagen — solange niemand von Hand gewählt hat.
@@ -3199,11 +3361,21 @@ document.addEventListener("change", async function(e){
   }
 });
 
+document.addEventListener("mousedown", function(e){
+  if(e.target.closest && e.target.closest(".vorschlaege")) e.preventDefault();
+});
+document.addEventListener("focusout", function(e){
+  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag"))
+    setTimeout(function(){ if(!(document.activeElement && document.activeElement.hasAttribute("data-vorschlag"))) vorschlaegeWeg(); }, 250);
+});
+
 document.addEventListener("keydown", function(e){
   if(e.key === "Escape" && overlayOffen()){ obersteSchliessen(); }
+  if(e.key === "Escape" && $(".vorschlaege")){ vorschlaegeWeg(); e.stopPropagation(); return; }
   // Enter in einer Zutat: nächste Zeile statt Speichern.
   if(e.key === "Enter" && e.target && e.target.classList && e.target.classList.contains("zu-name")){
     e.preventDefault();
+    vorschlaegeWeg();
     const r = e.target.closest(".zutatrow");
     if(r && r.nextElementSibling) r.nextElementSibling.querySelector(".zu-menge").focus();
     else zutatDazu();
@@ -3661,6 +3833,58 @@ async function vorraeteAufListe(){
     await listenLaden(); datenSichern();
     setToast(neu.length + (neu.length === 1 ? " Sache" : " Sachen") + " auf die Einkaufsliste gesetzt");
   }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
+async function zutatInsLager(name){
+  if(vorratZu(name)) return;
+  try{
+    const r = await sb.from("pantry_items").insert({ household_id: state.membership.household_id, name:name,
+      bereich: bereichRaten(name), status:"genug" }).select("*").single();
+    if(r.error) throw r.error;
+    state.pantry = state.pantry.concat([r.data]);
+    datenSichern();
+    setToast("„" + name + "“ steht jetzt im Lager");
+  }catch(err){ setToast(vorratFehler(err)); }
+  render();
+}
+// Eine Zutat umbenennen: alle Schreibweisen in allen Gerichten bekommen den
+// neuen Namen. Ist der neue Name eine andere vorhandene Zutat, werden beide eins.
+async function zutatZusammenfuehren(){
+  const z = state.zutatDialog; if(!z) return;
+  const feld = $("#zu-ziel"); if(feld) z.ziel = feld.value;
+  const ziel = z.ziel.trim(); if(!ziel) return;
+  const quelle = zutatenUebersicht().find(x => x.key === z.key); if(!quelle) return;
+  const zielKey = eintragKern(ziel);
+  const andere = zielKey !== z.key ? zutatenUebersicht().find(x => x.key === zielKey) : null;
+  if(andere){
+    const ja = await frage({ titel:"Zusammenführen?",
+      text:"„" + quelle.name + "“ wird zu „" + ziel + "“. " +
+        (quelle.gerichte.length ? quelle.gerichte.length + (quelle.gerichte.length === 1 ? " Gericht wird" : " Gerichte werden") + " angepasst." : ""),
+      knopf:"Zusammenführen" });
+    if(!ja) return;
+  }
+  const betroffen = state.dishes.map(g => {
+    const alt = zutatenVon(g);
+    const neu = alt.map(x => eintragKern(x.name) === z.key ? { menge:x.menge, name:ziel } : x);
+    return JSON.stringify(neu) === JSON.stringify(alt) ? null : { id:g.id, zutaten:neu };
+  }).filter(Boolean);
+  try{
+    for(const g of betroffen){
+      const r = await sb.from("dishes").update({ zutaten:g.zutaten }).eq("id", g.id);
+      if(r.error) throw r.error;
+    }
+    // Lager: Doppeltes weg, sonst den Namen mitziehen.
+    const alt = quelle.vorrat, neuV = andere && andere.vorrat;
+    if(alt && neuV){
+      const r = await sb.from("pantry_items").delete().eq("id", alt.id); if(r.error) throw r.error;
+    }else if(alt && alt.name !== ziel){
+      const r = await sb.from("pantry_items").update({ name:ziel }).eq("id", alt.id); if(r.error) throw r.error;
+    }
+    state.zutatDialog = null; chronikPruefen();
+    await kuecheLaden(); datenSichern();
+    setToast(andere ? "Zusammengeführt" : "Umbenannt");
+  }catch(err){ await kuecheLaden(); setToast(vorratFehler(err)); }
   render();
 }
 
