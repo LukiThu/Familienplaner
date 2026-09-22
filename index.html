@@ -189,10 +189,24 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
 button.pill:hover{filter:brightness(1.08)}
 .day:hover .pill{filter:brightness(1.05)}
 .pill .t{font-variant-numeric:tabular-nums;color:inherit;opacity:.78;flex:none;font-size:11.5px}
-.pill .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.pill .n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 /* Nur der blanke Buchstabe — jedes Pixel gehört dem Titel. */
 .pill .who{flex:none;font-size:11.5px;font-weight:800;color:inherit;opacity:.85}
-.pill .pfeil{flex:none;font-size:11px;line-height:1;opacity:.75;margin-left:auto}
+.pill .pfeil{flex:none;font-size:11px;line-height:1;opacity:.75}
+/* Durchgehender Balken über mehrere Tage: er reicht bis an die Zellkanten,
+   damit er von Zelle zu Zelle weiterläuft. Leere Spuren halten die Höhe. */
+.balken-zone{display:flex;flex-direction:column;gap:2px;width:calc(100% + 10px);margin:1px -5px 2px}
+.balken{
+  display:flex;align-items:center;gap:4px;width:100%;min-width:0;height:15px;padding:0 2px;
+  border:none;border-radius:0;font:inherit;font-size:11.5px;line-height:1;text-align:left;
+  background:var(--c-bg,var(--surface-2));color:var(--c-fg,var(--text));cursor:pointer;
+}
+.balken.leer{background:transparent;cursor:default}
+.balken.anfang{border-top-left-radius:5px;border-bottom-left-radius:5px;margin-left:4px;width:calc(100% - 4px);padding-left:4px}
+.balken.ende{border-top-right-radius:5px;border-bottom-right-radius:5px;margin-right:4px;width:calc(100% - 4px)}
+.balken.anfang.ende{width:calc(100% - 8px)}
+.balken .t{flex:none;font-size:11px;font-variant-numeric:tabular-nums;opacity:.85}
+.balken .n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 /* Die Fortsetzung am nächsten Tag ist bewusst blasser als das Original. */
 .pill.weiter{opacity:.62;padding-top:2px;padding-bottom:2px}
 .pill.weiter .t{font-size:11px}
@@ -576,6 +590,13 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
   .content{padding:10px}
   .content.ansicht-monat{padding-left:3px;padding-right:3px;padding-top:4px}
   .day{min-height:77px;padding:2px 2px 3px;gap:1px}
+  /* Der Balken muss so flach sein wie eine Pille, sonst wächst die Zeile. */
+  .balken-zone{width:calc(100% + 4px);margin:0 -2px 1px;gap:1px}
+  .balken{height:12px;font-size:10px;padding:0 1px}
+  .balken.anfang{margin-left:2px;width:calc(100% - 2px);padding-left:3px}
+  .balken.ende{margin-right:2px;width:calc(100% - 2px)}
+  .balken.anfang.ende{width:calc(100% - 4px)}
+  .balken .t{font-size:10px}
   .daynum{font-size:12px;padding:0 3px}
   .kw{font-size:8.5px;letter-spacing:0}
   .dayhead{gap:1px;overflow:hidden}
@@ -633,7 +654,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-22 22:40";
+const FASSUNG = "2026-09-22 23:00";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2035,6 +2056,65 @@ function pillHtml(o, klickbar){
 // Geht mit Uhrzeit über Mitternacht hinaus?
 function ueberNacht(o){ return !o.ev.ganztags && startOfDay(o.e) > startOfDay(o.s); }
 
+// Schichten über Mitternacht werden im Monat als durchgehender Balken
+// gezeichnet. Je Wochenzeile bekommt jede Schicht eine feste Spur, damit
+// der Balken in allen Zellen auf derselben Höhe sitzt.
+const BALKEN_SPUREN = 3;
+function vorkommenId(o){ return o.ev.id + "|" + o.s.getTime(); }
+function monatsBalken(start, nachTag){
+  const gesehen = {}, schichten = [];
+  Object.keys(nachTag).forEach(k => nachTag[k].forEach(function(o){
+    if(o.fortsetzung || !ueberNacht(o)) return;   // nur die Originale
+    const id = vorkommenId(o);
+    if(gesehen[id]) return;
+    gesehen[id] = true;
+    schichten.push(o);
+  }));
+  schichten.sort((a, b) => a.s - b.s || (b.e - b.s) - (a.e - a.s));
+
+  const plan = {};
+  for(let w = 0; w < 6; w++){
+    const zeileVon = addDays(start, w * 7), zeileBis = addDays(zeileVon, 6);
+    const spuren = [];
+    schichten.forEach(function(o){
+      const a = startOfDay(o.s), b = startOfDay(o.e);
+      if(b < zeileVon || a > zeileBis) return;
+      const von = a < zeileVon ? zeileVon : a, bis = b > zeileBis ? zeileBis : b;
+      let i = 0;
+      while(spuren[i] && spuren[i].some(x => !(x.bis < von || x.von > bis))) i++;
+      if(i >= BALKEN_SPUREN) return;     // zu viel für eine Zelle
+      (spuren[i] = spuren[i] || []).push({ von:von, bis:bis, o:o });
+    });
+    for(let i = 0; i < 7; i++){
+      const d = addDays(zeileVon, i);
+      plan[ymd(d)] = spuren.map(function(spur){
+        const t = spur.find(x => d >= x.von && d <= x.bis);
+        return t ? { o:t.o, anfang:sameDay(d, t.von), ende:sameDay(d, t.bis),
+                     echterAnfang:sameDay(d, startOfDay(t.o.s)), echtesEnde:sameDay(d, startOfDay(t.o.e)) } : null;
+      });
+    }
+  }
+  return plan;
+}
+function balkenHtml(zeile){
+  if(!zeile || !zeile.length || zeile.every(b => !b)) return "";
+  return '<span class="balken-zone">' + zeile.map(function(b){
+    if(!b) return '<span class="balken leer"></span>';
+    // Am Handy ist die Zelle zu schmal für Uhrzeit und Titel.
+    const eng = window.innerWidth < 641;
+    const beschriftung = b.echterAnfang
+      ? (eng ? "" : '<span class="t">' + hm(b.o.s) + '</span>') + '<span class="n">' + esc(b.o.ev.titel) + '</span>'
+      : b.echtesEnde ? '<span class="t">bis ' + hm(b.o.e) + '</span>'
+      : '<span class="n">' + esc(b.o.ev.titel) + '</span>';
+    // Bewusst ein span: Die Tageszelle ist selbst ein Knopf, und ein Knopf
+    // im Knopf zerreißt die Zelle im Browser.
+    return '<span class="balken' + (b.anfang ? " anfang" : "") + (b.ende ? " ende" : "") + '"' +
+      ' role="button" tabindex="0" data-act="oeffnen" data-id="' + b.o.ev.id + '" data-occ="' + ymd(b.o.s) + '"' +
+      ' style="' + farbenOf(b.o.ev) + '" title="' + esc(b.o.ev.titel + " · " + hm(b.o.s) + "–" + hm(b.o.e)) + '">' +
+      beschriftung + '</span>';
+  }).join("") + '</span>';
+}
+
 function monatsAnsicht(){
   const c = state.cursor;
   const first = new Date(c.getFullYear(), c.getMonth(), 1);
@@ -2045,16 +2125,15 @@ function monatsAnsicht(){
   const maxProTag = window.innerWidth < 641 ? 4 : 3;
 
   const nachTag = occurrencesNachTag(start, endOfDay(addDays(start, 41)));
+  const balken = monatsBalken(start, nachTag);
   let html = '<div class="monthgrid">' + WDS.map(w => '<div class="wdhead">' + w + '</div>').join("");
   for(let i=0; i<42; i++){
     const d = addDays(start, i);
     const key = ymd(d);
-    // Ganztägiges zuerst, dann Schichten über Mitternacht — die sollen
-    // nicht hinter „+n weitere“ verschwinden —, dann der Rest nach Uhrzeit.
-    const occ = (nachTag[key] || []).slice().sort(function(a, b){
-      const rang = o => o.ev.ganztags ? 0 : (o.fortsetzung || ueberNacht(o)) ? 1 : 2;
-      return rang(a) - rang(b) || a.s - b.s || String(a.ev.titel).localeCompare(String(b.ev.titel), "de");
-    });
+    // Schichten laufen als Balken oben durch, nicht als Pille in der Liste.
+    const imBalken = {};
+    (balken[key] || []).forEach(b => { if(b) imBalken[vorkommenId(b.o)] = true; });
+    const occ = (nachTag[key] || []).filter(o => !o.fortsetzung && !imBalken[vorkommenId(o)]);
     const zeigen = occ.slice(0, maxProTag);
     const rest = occ.length - zeigen.length;
     const ft = feiertagAn(d);
@@ -2068,6 +2147,7 @@ function monatsAnsicht(){
         (i % 7 === 0 ? '<span class="kw">KW' + (window.innerWidth < 641 ? "" : " ") + kalenderwoche(d) + '</span>' : "") +
         (ft ? '<span class="ft">' + esc(ft) + '</span>' : "") +
       '</span>' +
+      balkenHtml(balken[key]) +
       '<span class="daylist">' + zeigen.map(o => pillHtml(o, false)).join("") +
       (rest > 0 ? '<span class="more">+' + rest + '<span class="lbl"> weitere</span></span>' : "") +
       '</span></button>';
