@@ -478,6 +478,11 @@ button.pill:hover{filter:brightness(1.08)}
 .modal h2{margin:0;font-size:19px;letter-spacing:-.015em}
 .modal .actions{display:flex;gap:10px;align-items:center;padding-top:2px}
 .modal .actions .spacer{flex:1 1 auto}
+@media (max-width:640px){
+  .modal .actions{flex-wrap:wrap;gap:8px}
+  .modal .actions .spacer{display:none}
+  .modal .actions .btn{flex:1 1 calc(50% - 4px);min-width:0;justify-content:center}
+}
 .whopick{display:flex;gap:7px;flex-wrap:wrap}
 .whopick button{
   display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 12px;border-radius:999px;
@@ -618,7 +623,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-21 21:10";
+const FASSUNG = "2026-09-22 22:03";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2890,13 +2895,13 @@ function dialogAufgabe(){
       '<div class="field"><label for="auf-datum">Einmalig am</label>' +
         '<input id="auf-datum" type="date" value="' + esc(a.faellig_am) + '"></div>') +
     '<div class="field"><label for="auf-notiz">Notiz</label><textarea id="auf-notiz">' + esc(a.notiz) + '</textarea></div>' +
-    // Routine, aus einem bestimmten Tag geöffnet: nur diesen Tag auslassen.
-    (a.id && a.tag && a.wochentage.length
-      ? '<button class="btn" type="button" data-act="aufgabe-auslassen" style="align-self:flex-start">Nur am ' +
-          esc(tagKurz(parseYmd(a.tag))) + ' entfernen</button>'
-      : "") +
     '<div class="actions">' +
-      (a.id ? '<button class="btn danger" type="button" data-act="aufgabe-loeschen">' + (a.wochentage.length ? "Ganze Aufgabe löschen" : "Löschen") + '</button>' : "") +
+      // Routine, aus einem bestimmten Tag geöffnet: nur diesen Tag auslassen.
+      (a.id && a.tag && a.wochentage.length
+        ? '<button class="btn" type="button" data-act="aufgabe-auslassen">' +
+            (a.tag === ymd(new Date()) ? "Heute entfernen" : esc(tagKurz(parseYmd(a.tag))) + " entfernen") + '</button>'
+        : "") +
+      (a.id ? '<button class="btn danger" type="button" data-act="aufgabe-loeschen">' + (a.wochentage.length ? "Aufgabe löschen" : "Löschen") + '</button>' : "") +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
