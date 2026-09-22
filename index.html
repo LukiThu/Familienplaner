@@ -102,10 +102,11 @@ input[type=color]{width:46px;height:42px;padding:3px;border:1px solid var(--line
   padding:7px 14px;background:var(--surface);border-bottom:1px solid var(--line);
 }
 .topbar .spacer{flex:1 1 auto}
-.viewtabs{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px}
+.viewtabs{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:9px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.viewtabs::-webkit-scrollbar{display:none}
 .viewtabs button{
-  min-height:34px;padding:0 13px;border:none;border-radius:7px;background:transparent;
-  font-size:14.5px;font-weight:500;color:var(--muted);
+  flex:none;min-height:34px;padding:0 13px;border:none;border-radius:7px;background:transparent;
+  font-size:14.5px;font-weight:500;color:var(--muted);white-space:nowrap;
 }
 .viewtabs button[aria-pressed="true"]{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .datenav{display:flex;align-items:center;gap:6px}
@@ -273,9 +274,6 @@ button.pill:hover{filter:brightness(1.08)}
 .rail .aufgabe{margin-bottom:6px}
 .rail .aufgabe-haken{min-height:44px;padding:7px 8px;gap:9px}
 .rail .kasten{width:21px;height:21px;font-size:13px}
-.listenreiter{display:flex;gap:7px;flex-wrap:wrap}
-.listenkopf{display:flex;align-items:center;gap:8px;margin-top:4px}
-.listenkopf h2{margin:0;font-size:20px;letter-spacing:-.015em}
 .eintrag-form{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .eintrag-form input{flex:1 1 180px;min-width:0}
 .eintrag-form select{flex:0 1 190px;min-width:0}
@@ -324,6 +322,15 @@ button.pill:hover{filter:brightness(1.08)}
 .plantag-kopf span{font-weight:700;font-size:15px}
 .plantag-kopf small{color:var(--muted);font-size:13px;flex:1 1 auto}
 .plantag-kopf .btn{align-self:center}
+.planzeile{display:flex;align-items:flex-start;gap:8px;border-top:1px solid var(--line);padding:2px 0}
+.planzeile .mz{flex:0 0 58px;padding-top:11px;font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.planzeile .mzinhalt{flex:1 1 auto;min-width:0}
+.planzeile .planeintrag{border-top:none;margin-top:0;padding-top:0}
+.mzleer{
+  display:block;width:100%;text-align:left;padding:9px 0;border:none;background:none;
+  font:inherit;font-size:14px;color:var(--muted);cursor:pointer;
+}
+.mzleer:hover{color:var(--accent)}
 .planeintrag{display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding-top:4px;margin-top:4px}
 .planeintrag .pname{
   flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px;text-align:left;
@@ -517,7 +524,6 @@ button.pill:hover{filter:brightness(1.08)}
 .memberrow:last-of-type{border-bottom:none}
 .memberrow .nm{flex:2 1 120px;min-width:0}
 .memberrow .kz{flex:0 0 68px}
-.memberrow .kid{flex:none;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap}
 .bilanz{display:flex;gap:10px;flex-wrap:wrap}
 .bilanz > div{
   flex:1 1 90px;background:var(--surface-2);border-radius:8px;padding:10px 12px;
@@ -623,7 +629,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-22 22:03";
+const FASSUNG = "2026-09-22 22:24";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -696,7 +702,10 @@ const state = {
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
   zutatFilter:"", zutatDialog:null,
   plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
-  view: localStorage.getItem("fp.tablet") === "1" ? "tafel" : (localStorage.getItem("fp.view") || (window.innerWidth < 700 ? "tag" : "monat")),
+  // Wandtablet: Tafel. Handy: immer frisch im Monat. Sonst: zuletzt gewählt.
+  view: localStorage.getItem("fp.tablet") === "1" ? "tafel"
+      : window.innerWidth < 700 ? "monat"
+      : (localStorage.getItem("fp.view") || "monat"),
   standby:false,
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
@@ -1897,7 +1906,7 @@ function topbar(){
       '</nav>' +
       (bereich === "kalender"
         ? '<div class="viewtabs">' +
-            (state.tablet ? '<button data-act="view" data-v="tafel" aria-pressed="' + (state.view==="tafel") + '">Tafel</button>' : "") +
+            '<button data-act="view" data-v="tafel" aria-pressed="' + (state.view==="tafel") + '">Tafel</button>' +
             '<button data-act="view" data-v="monat" aria-pressed="' + (state.view==="monat") + '">Monat</button>' +
             '<button data-act="view" data-v="woche" aria-pressed="' + (state.view==="woche") + '">Woche</button>' +
             '<button data-act="view" data-v="tag"   aria-pressed="' + (state.view==="tag")   + '">Tag</button>' +
@@ -1907,6 +1916,14 @@ function topbar(){
         ? '<div class="viewtabs">' +
             '<button data-act="view" data-v="aufgaben" aria-pressed="' + (state.view==="aufgaben") + '">Tag</button>' +
             '<button data-act="view" data-v="aufgabenmonat" aria-pressed="' + (state.view==="aufgabenmonat") + '">Monat</button>' +
+          '</div>'
+        : "") +
+      (bereich === "listen" && state.lists.length
+        ? '<div class="viewtabs">' +
+            state.lists.map(l => '<button data-act="liste-waehlen" data-id="' + l.id + '" aria-pressed="' +
+              (!!aktiveListe() && aktiveListe().id === l.id) + '">' + esc(l.name) + '</button>').join("") +
+            (state.tablet ? "" : '<button data-act="liste-bearbeiten" aria-pressed="false" aria-label="Liste bearbeiten">' + ICON.stift(15) + '</button>' +
+              '<button data-act="liste-neu" aria-pressed="false" title="Neue Liste">+</button>') +
           '</div>'
         : "") +
       (bereich === "kueche"
@@ -2128,14 +2145,9 @@ function eintragZeile(e){
 
 function listenAnsicht(){
   const liste = aktiveListe();
-  const reiter = '<div class="listenreiter">' +
-    state.lists.map(l =>
-      '<button class="fchip" data-act="liste-waehlen" data-id="' + l.id + '" aria-pressed="' + (!!liste && l.id === liste.id) + '">' +
-        esc(l.name) + '</button>').join("") +
-    (state.tablet ? "" : '<button class="fchip" data-act="liste-neu">+ Liste</button>') +
-  '</div>';
   if(!liste){
-    return '<div class="agenda" style="max-width:640px">' + reiter +
+    return '<div class="agenda" style="max-width:640px">' +
+      '<button class="btn" data-act="liste-neu" style="align-self:flex-start">+ Liste</button>' +
       '<p class="empty">Noch keine Liste angelegt.</p></div>';
   }
 
@@ -2156,10 +2168,7 @@ function listenAnsicht(){
     inhalt = '<div class="field">' + offen.map(eintragZeile).join("") + '</div>';
   }
 
-  return '<div class="agenda" style="max-width:640px">' + reiter +
-    '<div class="listenkopf"><h2>' + esc(liste.name) + '</h2>' +
-      (state.tablet ? "" : '<button class="btn icon ghost" data-act="liste-bearbeiten" aria-label="Liste bearbeiten">' + ICON.stift(18) + '</button>') +
-    '</div>' +
+  return '<div class="agenda" style="max-width:640px">' +
     '<form class="eintrag-form" data-act="eintrag-neu">' +
       '<input id="eintrag-text" type="text" value="' + esc(state.entwurf || "") + '" placeholder="' +
         (liste.ist_einkauf ? "Was fehlt?" : "Neuer Eintrag") + '" autocomplete="off" enterkeyhint="done">' +
@@ -2317,6 +2326,7 @@ function zutatenUebersicht(){
     e.name = e.vorrat ? e.vorrat.name : oft[0];
     e.auch = oft.filter(n => n !== e.name);
     e.gerichte.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    e.bereich = e.vorrat ? (e.vorrat.bereich || "") : bereichRaten(e.name);
     return e;
   }).sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
@@ -2351,7 +2361,11 @@ function zutatenAnsicht(){
     (alle.length > 8 ? kuecheSuchfeld("Zutat suchen") : "") +
     (!alle.length ? '<p class="empty">Noch keine Zutaten — sie kommen aus den Gerichten und dem Lager.</p>'
       : !zeigen.length ? '<p class="empty">Nichts gefunden.</p>'
-      : zeigen.map(zeile).join("")) +
+      // Nach Ladenbereichen gruppiert, in der Reihenfolge des Einkaufs.
+      : ladenbereiche().concat([""]).map(function(b){
+          const drin = zeigen.filter(e => b ? e.bereich === b : ladenbereiche().indexOf(e.bereich) < 0);
+          return drin.length ? '<div class="field"><label>' + esc(b || "Ohne Bereich") + '</label>' + drin.map(zeile).join("") + '</div>' : "";
+        }).join("")) +
     (alle.length ? '<span class="hint">Namen antippen, um eine Schreibweise zu vereinheitlichen oder zwei Zutaten zusammenzuführen.</span>' : "") +
   '</div>';
 }
@@ -2407,7 +2421,12 @@ function wuerfeln(ohne){
   return pool[pool.length - 1];
 }
 
-function planAm(tag){ const t = ymd(tag); return state.plan.filter(e => e.tag === t); }
+const MAHLZEITEN = [["mittag","Mittag"],["abend","Abend"]];
+function planAm(tag, mahlzeit){
+  const t = ymd(tag);
+  return state.plan.filter(e => e.tag === t &&
+    (!mahlzeit || (mahlzeit === "extra" ? ["mittag","abend"].indexOf(e.mahlzeit || "abend") < 0 : (e.mahlzeit || "abend") === mahlzeit)));
+}
 function planGericht(e){ return e.gericht_id ? state.dishes.find(g => g.id === e.gericht_id) || null : null; }
 function planName(e){ const g = planGericht(e); return g ? g.name : (e.text || "?"); }
 function planMontag(){ return state.planWoche || mondayOf(new Date()); }
@@ -2443,12 +2462,26 @@ function essensplanAnsicht(){
     '<button class="btn" data-act="wochen-einkauf">Einkauf für die Woche</button>' +
     (state.dishes.length ? '<button class="btn" data-act="wuerfeln">&#127922; Würfeln</button>' : "") +
   '</div>';
+  // Mittag und Abend stehen immer da, auch wenn nichts geplant ist.
+  // Das Plus in der Zeile füllt sie, das Plus oben hängt eine weitere an.
+  const mahlzeit = (d, m, name) => {
+    const eintraege = planAm(d, m);
+    return '<div class="planzeile">' +
+      '<span class="mz">' + name + '</span>' +
+      '<div class="mzinhalt">' +
+        (eintraege.length ? eintraege.map(planEintragZeile).join("")
+          : '<button class="mzleer" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="' + m + '">+ Essen wählen</button>') +
+      '</div>' +
+      (eintraege.length ? '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="' + m + '" aria-label="' + name + ': noch etwas">' + ICON.plus(16) + '</button>' : "") +
+    '</div>';
+  };
   const tag = d => {
-    const eintraege = planAm(d);
+    const extra = planAm(d, "extra");
     return '<div class="plantag' + (sameDay(d, heute) ? " heute" : "") + (d < heute ? " vorbei" : "") + '">' +
       '<div class="plantag-kopf"><span>' + WDLANG[(d.getDay()+6)%7] + '</span><small>' + d.getDate() + ". " + MONATE[d.getMonth()] + '</small>' +
-        '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" aria-label="Essen planen">' + ICON.plus(18) + '</button></div>' +
-      eintraege.map(planEintragZeile).join("") +
+        '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="extra" aria-label="Weitere Zeile">' + ICON.plus(18) + '</button></div>' +
+      MAHLZEITEN.map(m => mahlzeit(d, m[0], m[1])).join("") +
+      (extra.length ? '<div class="planzeile"><span class="mz"></span><div class="mzinhalt">' + extra.map(planEintragZeile).join("") + '</div></div>' : "") +
     '</div>';
   };
   return '<div class="agenda" style="max-width:720px">' + kopf + knoepfe + tage.map(tag).join("") + '</div>';
@@ -2486,9 +2519,12 @@ function tafelAnsicht(){
       '<span class="g">' + (e.length ? esc(e.map(planName).join(" · ")) : "—") + '</span></div>';
   }).join("");
   const einkauf = einkaufsliste(), nochOffen = einkauf ? eintraegeVon(einkauf).filter(e => !e.erledigt).length : 0;
+  // Am Handy sieht man Uhrzeit und Datum ohnehin im Gerät.
   return '<div class="tafel">' +
-    '<div class="tafelkopf"><span class="tafeluhr">' + uhrText() + '</span>' +
-      '<span class="tafeldatum">' + tafelDatum(heute) + '<small>KW ' + kalenderwoche(heute) + '</small></span></div>' +
+    (state.tablet
+      ? '<div class="tafelkopf"><span class="tafeluhr">' + uhrText() + '</span>' +
+          '<span class="tafeldatum">' + tafelDatum(heute) + '<small>KW ' + kalenderwoche(heute) + '</small></span></div>'
+      : "") +
     '<section class="tafelspalte"><h2>Heute</h2>' + termine(heute, "Keine Termine.") +
       '<h2>Morgen · ' + WDLANG[(morgen.getDay()+6)%7] + '</h2>' + termine(morgen, "Keine Termine.") + '</section>' +
     '<section class="tafelspalte"><h2>Aufgaben</h2>' +
@@ -2664,17 +2700,14 @@ function bereichZeile(name, alt){
 }
 
 function dialogEinstellungen(){
-  const zeile = (m, mitKind) =>
+  const zeile = (m) =>
     '<div class="memberrow" data-mid="' + m.id + '">' +
       '<input class="nm" type="text" value="' + esc(m.name) + '" data-f="name" aria-label="Name">' +
       '<input class="kz" type="text" value="' + esc(m.kuerzel) + '" data-f="kuerzel" maxlength="4" aria-label="Kürzel">' +
       '<input type="color" value="' + esc(m.farbe) + '" data-f="farbe" aria-label="Farbe">' +
-      (mitKind
-        ? '<label class="kid"><input type="checkbox" data-f="ist_kind"' + (m.ist_kind ? " checked" : "") + '> Kind</label>'
-        : '') +
       '<button class="btn icon danger" type="button" data-act="member-weg" data-id="' + m.id + '" aria-label="entfernen">✕</button>' +
     '</div>';
-  const rows = personen().map(m => zeile(m, true)).join("");
+  const rows = personen().map(m => zeile(m)).join("");
   const katRows = kategorien().map(m => zeile(m, false)).join("");
   const z = state.zaehler;
   const importierte = z ? z.importiert : 0;
@@ -3053,6 +3086,12 @@ function dialogZutat(){
     '<div class="field"><label for="zu-ziel">Heißt künftig</label>' +
       '<span class="vorschlag-anker"><input id="zu-ziel" data-vorschlag type="text" value="' + esc(z.ziel) + '" autocomplete="off" required></span>' +
       '<span class="hint">Alle Gerichte werden angepasst. Wählst du eine andere vorhandene Zutat, werden beide zusammengeführt.</span></div>' +
+    '<div class="field"><label for="zu-bereich">Ladenbereich</label>' +
+      '<select id="zu-bereich"' + (e.vorrat ? "" : " disabled") + '>' +
+        '<option value="">' + (e.vorrat ? "Ohne Bereich" : (e.bereich ? esc(e.bereich) + " (aus der Einkaufsliste gelernt)" : "noch keiner")) + '</option>' +
+        (e.vorrat ? ladenbereiche().map(b => '<option value="' + esc(b) + '"' + (e.bereich === b ? " selected" : "") + '>' + esc(b) + '</option>').join("") : "") +
+      '</select>' +
+      '<span class="hint">' + (e.vorrat ? "Gilt auch für die Einkaufsliste." : "Festlegen geht, sobald die Zutat im Lager steht („ins Lager“).") + '</span></div>' +
     '<div class="actions">' +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
@@ -3080,7 +3119,7 @@ function dialogPlan(){
   const d = state.planDialog, tag = parseYmd(d.tag);
   const liste = gerichteZurAuswahl(d.suche);
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-notiz">' +
-    '<h2>Essen am ' + tagKurz(tag) + '</h2>' +
+    '<h2>' + (d.mahlzeit === "mittag" ? "Mittag" : d.mahlzeit === "abend" ? "Abend" : "Essen") + ' am ' + tagKurz(tag) + '</h2>' +
     '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder Notiz („Reste“)" autocomplete="off">' +
     '<div class="auswahlliste">' +
       (liste.length ? liste.map(g => auswahlKnopf(g, "plan-gericht")).join("")
@@ -3470,7 +3509,7 @@ async function aktion(act, el){
       if(b === "aufgaben"){ state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render(); }
       if(b === "kueche"){
         if(state.view === "gerichte") state.gericht = neuesGericht(null);
-        else if(state.view === "essen") state.planDialog = { tag: ymd(planStandardTag()), suche:"" };
+        else if(state.view === "essen") state.planDialog = { tag: ymd(planStandardTag()), mahlzeit:"abend", suche:"" };
         else state.vorrat = { id:null, name:"", bereich:"" };
         overlayOeffnen(); return render();
       }
@@ -3607,17 +3646,17 @@ async function aktion(act, el){
       state.planWoche = d === 0 ? null : addDays(planMontag(), 7 * d);
       return render();
     }
-    case "plan-neu": state.planDialog = { tag: el.dataset.tag, suche:"" }; overlayOeffnen(); render();
+    case "plan-neu": state.planDialog = { tag: el.dataset.tag, mahlzeit: el.dataset.m || "abend", suche:"" }; overlayOeffnen(); render();
       setTimeout(function(){ const f = $("#plan-suche"); if(f && !state.tablet) f.focus(); }, 30);
       return;
-    case "plan-gericht": return planEintragen(state.planDialog.tag, el.dataset.id, "");
+    case "plan-gericht": return planEintragen(state.planDialog.tag, el.dataset.id, "", state.planDialog.mahlzeit);
     case "plan-weg": return planEntfernen(el.dataset.id);
     case "plan-als-notiz": {
       const t = (($("#plan-suche") || {}).value || "").trim();
-      return t ? planEintragen(state.planDialog.tag, null, t) : undefined;
+      return t ? planEintragen(state.planDialog.tag, null, t, state.planDialog.mahlzeit) : undefined;
     }
     case "heute-kochen": state.heuteKochen = true; overlayOeffnen(); return render();
-    case "heute-waehlen": state.heuteKochen = false; chronikPruefen(); return planEintragen(ymd(new Date()), el.dataset.id, "");
+    case "heute-waehlen": state.heuteKochen = false; chronikPruefen(); return planEintragen(ymd(new Date()), el.dataset.id, "", "abend");
     case "wochen-einkauf": state.wochenEinkauf = {}; overlayOeffnen(); return render();
     case "standby-weg":
       state.standby = false; state.view = "tafel"; state.cursor = new Date();
@@ -3635,7 +3674,7 @@ async function aktion(act, el){
       const w = state.wuerfel; if(!w) return;
       const sel = $("#wuerfel-tag"), tag = sel ? sel.value : w.tag;
       state.wuerfel = null; chronikPruefen();
-      return planEintragen(tag, w.id, "");
+      return planEintragen(tag, w.id, "", "abend");
     }
     case "zutat-filter": state.zutatFilter = state.zutatFilter === el.dataset.f ? "" : el.dataset.f; return render();
     case "zutat-ins-lager": return zutatInsLager(el.dataset.name);
@@ -3743,7 +3782,7 @@ document.addEventListener("submit", async function(e){
       // Enter: erstes passendes Gericht, sonst als Notiz.
       const t = (($("#plan-suche") || {}).value || "").trim(); if(!t) return;
       const g = gerichteZurAuswahl(t)[0];
-      return await planEintragen(state.planDialog.tag, g ? g.id : null, g ? "" : t);
+      return await planEintragen(state.planDialog.tag, g ? g.id : null, g ? "" : t, state.planDialog.mahlzeit);
     }
     if(act === "wochen-einkauf-los")return await wochenEinkaufAufListe();
     if(act === "liste-speichern")   return await listeSpeichern();
@@ -4415,6 +4454,7 @@ async function zutatInsLager(name){
 async function zutatZusammenfuehren(){
   const z = state.zutatDialog; if(!z) return;
   const feld = $("#zu-ziel"); if(feld) z.ziel = feld.value;
+  const bFeld = $("#zu-bereich"); z.bereich = bFeld && !bFeld.disabled ? bFeld.value : null;
   const ziel = z.ziel.trim(); if(!ziel) return;
   const quelle = zutatenUebersicht().find(x => x.key === z.key); if(!quelle) return;
   const zielKey = eintragKern(ziel);
@@ -4436,12 +4476,14 @@ async function zutatZusammenfuehren(){
       const r = await sb.from("dishes").update({ zutaten:g.zutaten }).eq("id", g.id);
       if(r.error) throw r.error;
     }
-    // Lager: Doppeltes weg, sonst den Namen mitziehen.
+    // Lager: Doppeltes weg, sonst Name und Bereich mitziehen.
     const alt = quelle.vorrat, neuV = andere && andere.vorrat;
     if(alt && neuV){
       const r = await sb.from("pantry_items").delete().eq("id", alt.id); if(r.error) throw r.error;
-    }else if(alt && alt.name !== ziel){
-      const r = await sb.from("pantry_items").update({ name:ziel }).eq("id", alt.id); if(r.error) throw r.error;
+    }else if(alt && (alt.name !== ziel || (z.bereich !== null && z.bereich !== (alt.bereich || "")))){
+      const feld = { name:ziel };
+      if(z.bereich !== null) feld.bereich = z.bereich;
+      const r = await sb.from("pantry_items").update(feld).eq("id", alt.id); if(r.error) throw r.error;
     }
     state.zutatDialog = null; chronikPruefen();
     await kuecheLaden(); datenSichern();
@@ -4450,9 +4492,10 @@ async function zutatZusammenfuehren(){
   render();
 }
 
-async function planEintragen(tag, gerichtId, text){
+async function planEintragen(tag, gerichtId, text, mahlzeit){
   const g = gerichtId ? state.dishes.find(x => x.id === gerichtId) : null;
-  const zeile = { household_id: state.membership.household_id, tag: tag, gericht_id: g ? g.id : null, text: g ? g.name : text };
+  const zeile = { household_id: state.membership.household_id, tag: tag, gericht_id: g ? g.id : null,
+                  text: g ? g.name : text, mahlzeit: mahlzeit || "abend" };
   const vorlaeufig = Object.assign({ id:"neu-" + Date.now(), created_at:new Date().toISOString() }, zeile);
   state.plan = state.plan.concat([vorlaeufig]);
   state.planDialog = null; chronikPruefen();
@@ -4630,14 +4673,13 @@ async function einstellungenSpeichern(){
     const v = f => row.querySelector('[data-f="' + f + '"]');
     const m = memberById(row.dataset.mid);
     if(!m) return;
-    // Kategoriezeilen haben kein Kind-Häkchen — fehlende Felder behalten
-    // den bisherigen Wert, statt den Lesevorgang abzubrechen.
+    // Fehlende Felder behalten den bisherigen Wert, statt den
+    // Lesevorgang abzubrechen.
     gelesen.push({
       id: m.id,
       name:    v("name")     ? v("name").value.trim()    : m.name,
       kuerzel: v("kuerzel")  ? v("kuerzel").value.trim() : m.kuerzel,
-      farbe:   v("farbe")    ? v("farbe").value          : m.farbe,
-      ist_kind: v("ist_kind") ? v("ist_kind").checked    : m.ist_kind
+      farbe:   v("farbe")    ? v("farbe").value          : m.farbe
     });
   });
 
@@ -4671,8 +4713,8 @@ async function einstellungenSpeichern(){
     for(const g of gelesen){
       const m = memberById(g.id);
       if(!m) continue;
-      const neu = { name: g.name || m.name, kuerzel: g.kuerzel, farbe: g.farbe, ist_kind: g.ist_kind };
-      if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe || neu.ist_kind !== m.ist_kind){
+      const neu = { name: g.name || m.name, kuerzel: g.kuerzel, farbe: g.farbe };
+      if(neu.name !== m.name || neu.kuerzel !== m.kuerzel || neu.farbe !== m.farbe){
         const r = await sb.from("members").update(neu).eq("id", g.id);
         if(r.error) throw r.error;
       }
