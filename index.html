@@ -655,7 +655,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-23 08:58";
+const FASSUNG = "2026-09-23 09:06";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2100,8 +2100,15 @@ function monatsBalken(start, nachTag){
   }
   return plan;
 }
-function balkenHtml(zeile){
-  if(!zeile || !zeile.length || zeile.every(b => !b)) return "";
+function balkenHtml(spuren){
+  if(!spuren || !spuren.length) return "";
+  // Freie Spuren zählen nur oberhalb eines Balkens — sie halten ihn auf
+  // seiner Höhe. Was unter dem letzten Balken frei bleibt, fällt weg,
+  // sonst rutschen die Termine des Tages ohne Grund nach unten.
+  let letzte = -1;
+  spuren.forEach((b, i) => { if(b) letzte = i; });
+  if(letzte < 0) return "";
+  const zeile = spuren.slice(0, letzte + 1);
   return '<span class="balken-zone">' + zeile.map(function(b){
     if(!b) return '<span class="balken leer"></span>';
     // Am Handy ist die Zelle zu schmal für Uhrzeit und Titel.
