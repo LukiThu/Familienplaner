@@ -446,6 +446,7 @@ button.pill:hover{filter:brightness(1.08)}
 }
 .zutatzeile .zname b{font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .zutatzeile .zname small{font-size:12.5px;color:var(--knapp)}
+.zutatzeile .zname .zbereich{color:var(--muted)}
 .zutatzeile .ampel{margin-right:0}
 .zutatzeile .kopf .btn{min-height:34px;height:34px;padding:0 12px;font-size:13.5px}
 .zutatzeile .kein-lager{font-size:13px;color:var(--muted);white-space:nowrap}
@@ -655,7 +656,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-24 19:34";
+const FASSUNG = "2026-09-24 19:48";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2324,8 +2325,11 @@ function listenAnsicht(){
 
   return '<div class="agenda" style="max-width:640px">' +
     '<form class="eintrag-form" data-act="eintrag-neu">' +
-      '<input id="eintrag-text" type="text" value="' + esc(state.entwurf || "") + '" placeholder="' +
+      (liste.ist_einkauf ? '<span class="vorschlag-anker">' : "") +
+      '<input id="eintrag-text" type="text"' + (liste.ist_einkauf ? " data-vorschlag" : "") +
+        ' value="' + esc(state.entwurf || "") + '" placeholder="' +
         (liste.ist_einkauf ? "Was fehlt?" : "Neuer Eintrag") + '" autocomplete="off" enterkeyhint="done">' +
+      (liste.ist_einkauf ? '</span>' : "") +
       (liste.ist_einkauf
         ? '<select id="eintrag-bereich" aria-label="Ladenbereich"><option value="">Bereich …</option>' +
             bereiche.map(b => '<option value="' + esc(b) + '">' + esc(b) + '</option>').join("") + '</select>'
@@ -2369,6 +2373,15 @@ function kuecheSuchfeld(platzhalter){
   return '<input id="kueche-suche" class="kueche-suche" type="search" value="' + esc(state.kuecheSuche) +
     '" placeholder="' + platzhalter + '" autocomplete="off" aria-label="Suchen">';
 }
+// Wie viele Vorräte knapp oder leer sind und noch nicht auf der Liste stehen.
+function fehlendeVorraete(){
+  const liste = aufDerListe();
+  return state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
+}
+function einkaufKnopf(){
+  const n = fehlendeVorraete();
+  return n ? '<button class="btn" data-act="lager-einkaufen">' + n + ' auf die Einkaufsliste</button>' : "";
+}
 function lagerTreffer(){
   const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
@@ -2392,16 +2405,13 @@ function lagerTreffer(){
   return inhalt;
 }
 function lagerAnsicht(){
-  const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
-  const fehlend = state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
   const bereiche = ladenbereiche();
   return '<div class="agenda" style="max-width:640px">' +
     '<div class="kuechenleiste">' +
       '<button class="fchip" data-act="lager-filter" data-f="alle" aria-pressed="' + !nurKnapp + '">Alles</button>' +
       '<button class="fchip" data-act="lager-filter" data-f="knapp" aria-pressed="' + nurKnapp + '">Knapp &amp; leer</button>' +
-      '<span class="spacer"></span>' +
-      (fehlend ? '<button class="btn" data-act="lager-einkaufen">' + fehlend + ' auf die Einkaufsliste</button>' : "") +
+      '<span class="spacer"></span>' + einkaufKnopf() +
     '</div>' +
     (state.pantry.length > 8 ? kuecheSuchfeld("Im Lager suchen") : "") +
     '<form class="eintrag-form" data-act="vorrat-neu">' +
@@ -2505,6 +2515,7 @@ function zutatenTreffer(){
     '<div class="zutatzeile">' +
       '<div class="kopf">' +
         '<button class="zname" data-act="zutat-oeffnen" data-key="' + esc(e.key) + '"><b>' + esc(e.name) + '</b>' +
+          '<small class="zbereich">' + esc(e.bereich || "ohne Bereich") + (e.bereich && !e.vorrat ? " (gelernt)" : "") + '</small>' +
           (e.auch.length ? '<small>auch: ' + esc(e.auch.join(", ")) + '</small>' : "") + '</button>' +
         (e.vorrat
           ? '<div class="ampel" role="group" aria-label="Vorrat">' + AMPEL.map(a =>
@@ -2530,7 +2541,8 @@ function zutatenAnsicht(){
   const f = state.zutatFilter;
   return '<div class="agenda" style="max-width:720px">' +
     '<div class="kuechenleiste">' + ZUTAT_FILTER.map(x =>
-      '<button class="fchip" data-act="zutat-filter" data-f="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>').join("") + '</div>' +
+      '<button class="fchip" data-act="zutat-filter" data-f="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>').join("") +
+      '<span class="spacer"></span>' + einkaufKnopf() + '</div>' +
     (zutatenUebersicht().length > 8 ? kuecheSuchfeld("Zutat suchen") : "") +
     '<div id="kueche-treffer">' + zutatenTreffer() + '</div>' +
   '</div>';
@@ -3176,11 +3188,22 @@ function bekannteNamen(){
   const gesehen = {}, namen = [];
   state.pantry.map(p => p.name)
     .concat(...state.dishes.map(g => zutatenVon(g).map(z => z.name)))
+    // Was schon einmal auf einer Liste stand, ist auch ein guter Vorschlag.
+    .concat(state.listItems.map(e => e.text))
     .forEach(n => { const k = eintragKern(n); if(k && !gesehen[k]){ gesehen[k] = true; namen.push(n); } });
   return namen;
 }
+// „2 Dosen “ vor dem Namen bleibt beim Übernehmen eines Vorschlags stehen.
+function mengenVorspann(text){
+  const roh = String(text || "");
+  const teile = roh.split(/(\s+)/);
+  let i = 0;
+  while(i + 2 < teile.length && MENGENWORT.test(suchText(teile[i]))) i += 2;
+  return teile.slice(0, i).join("");
+}
 function namenVorschlaege(eingabe){
-  const such = suchText(eingabe.trim());
+  // „2 Dosen tom“ soll „Passierte Tomaten“ finden.
+  const such = suchText(String(eingabe).slice(mengenVorspann(eingabe).length).trim());
   if(!such) return [];
   return bekannteNamen()
     .filter(n => suchText(n).indexOf(such) >= 0 && suchText(n) !== such)
@@ -3853,7 +3876,14 @@ async function aktion(act, el){
     case "zutat-neu": return zutatDazu();
     case "vorschlag": {
       const feld = el.closest(".vorschlag-anker").querySelector("input");
-      feld.value = el.dataset.name; vorschlaegeWeg(); feld.focus();
+      feld.value = mengenVorspann(feld.value) + el.dataset.name;
+      vorschlaegeWeg(); feld.focus();
+      // In der Einkaufsliste hängen Entwurf und Bereichsvorschlag daran.
+      if(feld.id === "eintrag-text"){
+        state.entwurf = feld.value;
+        const sel = document.getElementById("eintrag-bereich");
+        if(sel && !sel.dataset.vonHand) sel.value = bereichRaten(feld.value);
+      }
       return;
     }
     case "zutat-weg": {
@@ -4064,15 +4094,15 @@ document.addEventListener("input", function(e){
     if(knopf) knopf.disabled = !e.target.value.trim();
     return spaeter(function(){ if(state.planDialog) teilNeu("plan-treffer", planTreffer()); });
   }
-  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag")){
-    const feld = e.target;
-    return spaeter(function(){ if(document.activeElement === feld) vorschlaegeZeigen(feld); });
-  }
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
     // Bereich vom letzten Mal vorschlagen — solange niemand von Hand gewählt hat.
     const sel = document.getElementById("eintrag-bereich");
     if(sel && !sel.dataset.vonHand) sel.value = bereichRaten(e.target.value);
+  }
+  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag")){
+    const feld = e.target;
+    return spaeter(function(){ if(document.activeElement === feld) vorschlaegeZeigen(feld); });
   }
 });
 
