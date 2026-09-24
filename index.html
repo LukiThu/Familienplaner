@@ -655,7 +655,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-23 09:06";
+const FASSUNG = "2026-09-24 19:34";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1715,6 +1715,17 @@ async function erinnerungSpeichern(eventId, wert){
 // Neu zeichnen, weil sich im Hintergrund etwas geändert hat (Live-Abgleich,
 // Zeitgeber, Verbindung zurück). Vorher einsammeln, was gerade in einem
 // offenen Fenster steht — sonst wäre halb Getipptes weg.
+// Tastendruck für Tastendruck neu zu rechnen ruckelt; ein kurzer Moment
+// Ruhe genügt, damit sich das Tippen flüssig anfühlt.
+let tippTimer = null;
+function spaeter(fn){ clearTimeout(tippTimer); tippTimer = setTimeout(fn, 120); }
+function teilNeu(id, html){ const el = document.getElementById(id); if(el) el.innerHTML = html; }
+function kuecheTreffer(){
+  return state.view === "lager" ? lagerTreffer()
+       : state.view === "gerichte" ? gerichteTreffer()
+       : state.view === "zutaten" ? zutatenTreffer() : "";
+}
+
 function renderImHintergrund(){
   if(state.dialog && $("#ev-titel")) dialogLesen();
   if(state.aufgabe && $("#auf-titel")) aufgabeLesen();
@@ -2358,13 +2369,12 @@ function kuecheSuchfeld(platzhalter){
   return '<input id="kueche-suche" class="kueche-suche" type="search" value="' + esc(state.kuecheSuche) +
     '" placeholder="' + platzhalter + '" autocomplete="off" aria-label="Suchen">';
 }
-function lagerAnsicht(){
+function lagerTreffer(){
   const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
   const such = suchText(state.kuecheSuche.trim());
   const zeigen = state.pantry.filter(p => (!nurKnapp || p.status !== "genug") && (!such || suchText(p.name).indexOf(such) >= 0))
     .slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
-  const fehlend = state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
   const bereiche = ladenbereiche();
 
   let inhalt = "";
@@ -2379,7 +2389,13 @@ function lagerAnsicht(){
         drin.map(p => vorratZeile(p, liste)).join("") + '</div>';
     });
   }
-
+  return inhalt;
+}
+function lagerAnsicht(){
+  const liste = aufDerListe();
+  const nurKnapp = state.lagerFilter === "knapp";
+  const fehlend = state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
+  const bereiche = ladenbereiche();
   return '<div class="agenda" style="max-width:640px">' +
     '<div class="kuechenleiste">' +
       '<button class="fchip" data-act="lager-filter" data-f="alle" aria-pressed="' + !nurKnapp + '">Alles</button>' +
@@ -2394,7 +2410,7 @@ function lagerAnsicht(){
         bereiche.map(b => '<option value="' + esc(b) + '">' + esc(b) + '</option>').join("") + '</select>' +
       '<button class="btn primary" type="submit" aria-label="Hinzufügen">+</button>' +
     '</form>' +
-    inhalt +
+    '<div id="kueche-treffer">' + lagerTreffer() + '</div>' +
   '</div>';
 }
 
@@ -2428,23 +2444,26 @@ function gerichtKarte(g){
     (st.knapp.length ? '<span class="knapp">Knapp: ' + esc(st.knapp.map(p => p.name).join(", ")) + '</span>' : "") +
   '</button>';
 }
-function gerichteAnsicht(){
+function gerichteTreffer(){
   // „Lange nicht gegessen“: das am längsten Vergessene zuerst, Nie-Gekochtes ganz oben.
   const lange = state.gerichtFilter.indexOf("lange") >= 0;
   const alter = g => { const z = zuletztGegessen(g); return z ? tageSeit(z) : 99999; };
   const zeigen = state.dishes.filter(gerichtPasst).slice()
     .sort((a, b) => (lange ? alter(b) - alter(a) : 0) || a.name.localeCompare(b.name, "de"));
+  return !state.dishes.length
+      ? '<p class="empty">Noch keine Gerichte. Mit + legt ihr eure Sammlung an — die Zutaten eine pro Zeile.</p>'
+      : !zeigen.length
+        ? '<p class="empty">Kein Gericht passt zu diesen Filtern.</p>'
+        : '<div class="gerichte">' + zeigen.map(gerichtKarte).join("") + '</div>';
+}
+function gerichteAnsicht(){
   const chips = GERICHT_FILTER.map(f =>
     '<button class="fchip" data-act="gericht-filter" data-f="' + f[0] + '" aria-pressed="' + (state.gerichtFilter.indexOf(f[0]) >= 0) + '">' + f[1] + '</button>').join("");
   return '<div class="agenda" style="max-width:980px">' +
     '<div class="kuechenleiste wischbar">' +
       (state.dishes.length ? '<button class="btn" data-act="wuerfeln">&#127922; Würfeln</button>' : "") + chips + '</div>' +
     (state.dishes.length > 6 ? kuecheSuchfeld("Gericht oder Zutat suchen") : "") +
-    (!state.dishes.length
-      ? '<p class="empty">Noch keine Gerichte. Mit + legt ihr eure Sammlung an — die Zutaten eine pro Zeile.</p>'
-      : !zeigen.length
-        ? '<p class="empty">Kein Gericht passt zu diesen Filtern.</p>'
-        : '<div class="gerichte">' + zeigen.map(gerichtKarte).join("") + '</div>') +
+    '<div id="kueche-treffer">' + gerichteTreffer() + '</div>' +
   '</div>';
 }
 
@@ -2474,7 +2493,7 @@ function zutatenUebersicht(){
   }).sort((a, b) => a.name.localeCompare(b.name, "de"));
 }
 const ZUTAT_FILTER = [["ohneLager","Nicht im Lager"],["ohneGericht","In keinem Gericht"],["fehlt","Fehlt gerade"]];
-function zutatenAnsicht(){
+function zutatenTreffer(){
   const alle = zutatenUebersicht();
   const such = suchText(state.kuecheSuche.trim()), f = state.zutatFilter;
   const zeigen = alle.filter(e =>
@@ -2498,18 +2517,22 @@ function zutatenAnsicht(){
           : '<span class="ohne">in keinem Gericht</span>') +
       '</div>' +
     '</div>';
-  return '<div class="agenda" style="max-width:720px">' +
-    '<div class="kuechenleiste">' + ZUTAT_FILTER.map(x =>
-      '<button class="fchip" data-act="zutat-filter" data-f="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>').join("") + '</div>' +
-    (alle.length > 8 ? kuecheSuchfeld("Zutat suchen") : "") +
-    (!alle.length ? '<p class="empty">Noch keine Zutaten — sie kommen aus den Gerichten und dem Lager.</p>'
+  return (!alle.length ? '<p class="empty">Noch keine Zutaten — sie kommen aus den Gerichten und dem Lager.</p>'
       : !zeigen.length ? '<p class="empty">Nichts gefunden.</p>'
       // Nach Ladenbereichen gruppiert, in der Reihenfolge des Einkaufs.
       : ladenbereiche().concat([""]).map(function(b){
           const drin = zeigen.filter(e => b ? e.bereich === b : ladenbereiche().indexOf(e.bereich) < 0);
           return drin.length ? '<div class="field"><label>' + esc(b || "Ohne Bereich") + '</label>' + drin.map(zeile).join("") + '</div>' : "";
         }).join("")) +
-    (alle.length ? '<span class="hint">Namen antippen, um eine Schreibweise zu vereinheitlichen oder zwei Zutaten zusammenzuführen.</span>' : "") +
+    (alle.length ? '<span class="hint">Namen antippen, um eine Schreibweise zu vereinheitlichen oder zwei Zutaten zusammenzuführen.</span>' : "");
+}
+function zutatenAnsicht(){
+  const f = state.zutatFilter;
+  return '<div class="agenda" style="max-width:720px">' +
+    '<div class="kuechenleiste">' + ZUTAT_FILTER.map(x =>
+      '<button class="fchip" data-act="zutat-filter" data-f="' + x[0] + '" aria-pressed="' + (f === x[0]) + '">' + x[1] + '</button>').join("") + '</div>' +
+    (zutatenUebersicht().length > 8 ? kuecheSuchfeld("Zutat suchen") : "") +
+    '<div id="kueche-treffer">' + zutatenTreffer() + '</div>' +
   '</div>';
 }
 
@@ -3258,18 +3281,20 @@ function auswahlKnopf(g, act, tag){
     (st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : "") +
   '</button>';
 }
+function planTreffer(){
+  const liste = gerichteZurAuswahl(state.planDialog.suche);
+  return liste.length ? liste.map(g => auswahlKnopf(g, "plan-gericht")).join("")
+    : '<p class="hint">' + (state.dishes.length ? "Kein Gericht gefunden." : "Noch keine Gerichte angelegt.") + '</p>';
+}
 function dialogPlan(){
   const d = state.planDialog, tag = parseYmd(d.tag);
-  const liste = gerichteZurAuswahl(d.suche);
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-notiz">' +
     '<h2>' + (d.mahlzeit === "mittag" ? "Mittag" : d.mahlzeit === "abend" ? "Abend" : "Essen") + ' am ' + tagKurz(tag) + '</h2>' +
     '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder Notiz („Reste“)" autocomplete="off">' +
-    '<div class="auswahlliste">' +
-      (liste.length ? liste.map(g => auswahlKnopf(g, "plan-gericht")).join("")
-        : '<p class="hint">' + (state.dishes.length ? "Kein Gericht gefunden." : "Noch keine Gerichte angelegt.") + '</p>') +
-    '</div>' +
+    '<div class="auswahlliste" id="plan-treffer">' + planTreffer() + '</div>' +
     '<div class="actions">' +
-      (d.suche.trim() ? '<button class="btn" type="button" data-act="plan-als-notiz">„' + esc(d.suche.trim()) + '“ als Notiz</button>' : "") +
+      '<button class="btn" type="button" data-act="plan-als-notiz" id="plan-notiz-knopf"' + (d.suche.trim() ? "" : " disabled") + '>' +
+        (d.suche.trim() ? 'Als Notiz eintragen' : 'Als Notiz eintragen') + '</button>' +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
     '</div>' +
@@ -4026,9 +4051,23 @@ document.addEventListener("touchend", function(e){
 }, { passive:true });
 
 document.addEventListener("input", function(e){
-  if(e.target && e.target.id === "kueche-suche"){ state.kuecheSuche = e.target.value; return render(); }
-  if(e.target && e.target.id === "plan-suche" && state.planDialog){ state.planDialog.suche = e.target.value; return render(); }
-  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag")) return vorschlaegeZeigen(e.target);
+  // Beim Tippen nicht die ganze Seite neu zeichnen: Das Eingabefeld würde
+  // dabei ersetzt, und auf langsamen Geräten gehen so Zeichen verloren.
+  // Stattdessen kurz abwarten und nur die Trefferliste austauschen.
+  if(e.target && e.target.id === "kueche-suche"){
+    state.kuecheSuche = e.target.value;
+    return spaeter(function(){ teilNeu("kueche-treffer", kuecheTreffer()); });
+  }
+  if(e.target && e.target.id === "plan-suche" && state.planDialog){
+    state.planDialog.suche = e.target.value;
+    const knopf = $("#plan-notiz-knopf");
+    if(knopf) knopf.disabled = !e.target.value.trim();
+    return spaeter(function(){ if(state.planDialog) teilNeu("plan-treffer", planTreffer()); });
+  }
+  if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-vorschlag")){
+    const feld = e.target;
+    return spaeter(function(){ if(document.activeElement === feld) vorschlaegeZeigen(feld); });
+  }
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
     // Bereich vom letzten Mal vorschlagen — solange niemand von Hand gewählt hat.
