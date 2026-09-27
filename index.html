@@ -447,6 +447,9 @@ button.pill:hover{filter:brightness(1.08)}
 .zutatzeile .zname b{font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .zutatzeile .zname small{font-size:12.5px;color:var(--knapp)}
 .zutatzeile .zname .zbereich{color:var(--muted)}
+.artikel .kasten{font-size:18px;color:var(--muted);background:none}
+.artikel .aufgabe-haken[disabled]{opacity:.55}
+.artikel .aufgabe-haken[disabled] .kasten{background:var(--accent);border-color:var(--accent);color:#fff}
 .zutatzeile .ampel{margin-right:0}
 .zutatzeile .kopf .btn{min-height:34px;height:34px;padding:0 12px;font-size:13.5px}
 .zutatzeile .kein-lager{font-size:13px;color:var(--muted);white-space:nowrap}
@@ -656,7 +659,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-24 19:48";
+const FASSUNG = "2026-09-27 20:38";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -727,7 +730,7 @@ const state = {
   lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   filterOffen:false,
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
-  zutatFilter:"", zutatDialog:null,
+  zutatFilter:"", zutatDialog:null, artikel:[], artikelDialog:null,
   plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
   // Wandtablet: Tafel. Handy: immer frisch im Monat. Sonst: zuletzt gewählt.
   view: localStorage.getItem("fp.tablet") === "1" ? "tafel"
@@ -813,12 +816,14 @@ async function kuecheLaden(){
 
 async function listenLaden(){
   const hid = state.membership.household_id;
-  const [li, ein] = await Promise.all([
+  const [li, ein, art] = await Promise.all([
     sb.from("lists").select("*").eq("household_id", hid).order("sortierung").order("name"),
-    sb.from("list_items").select("*").eq("household_id", hid).order("created_at")
+    sb.from("list_items").select("*").eq("household_id", hid).order("created_at"),
+    sb.from("articles").select("*").eq("household_id", hid).order("name")
   ]);
   if(!li.error)  state.lists = li.data || [];
   if(!ein.error) state.listItems = ein.data || [];
+  if(!art.error) state.artikel = art.data || [];
 }
 
 async function aufgabenLaden(){
@@ -874,6 +879,7 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"task_completions" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"lists" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"list_items" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"articles" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"pantry_items" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"dishes" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"meal_plan" }, refreshQuiet)
@@ -1402,7 +1408,10 @@ function ladenbereiche(){
   return (state.household && state.household.ladenbereiche && state.household.ladenbereiche.length)
     ? state.household.ladenbereiche : LADEN_STANDARD;
 }
+const ARTIKEL_REITER = "__artikel";
+function artikelAnsichtAktiv(){ return state.listeAktiv === ARTIKEL_REITER; }
 function aktiveListe(){
+  if(artikelAnsichtAktiv()) return null;
   return state.lists.find(l => l.id === state.listeAktiv)
       || state.lists.find(l => l.ist_einkauf)
       || state.lists[0] || null;
@@ -1432,11 +1441,46 @@ function eintragKern(text){
   while(woerter.length > 1 && MENGENWORT.test(woerter[0])) woerter.shift();
   return woerter.map(wortstamm).join(" ");
 }
+// „2 Dosen Passierte Tomaten“ → „Passierte Tomaten“.
+function ohneMenge(text){
+  const rest = String(text || "").slice(mengenVorspann(text).length).trim();
+  return rest || String(text || "").trim();
+}
+function artikelZu(text){
+  const k = eintragKern(text);
+  return k ? (state.artikel.find(a => eintragKern(a.name) === k) || null) : null;
+}
+// Jeder Eintrag der Einkaufsliste landet im Artikelstamm — auch wenn der
+// Eintrag später gelöscht wird, bleiben Name und Ladenbereich erhalten.
+async function artikelMerken(text, bereich){
+  const name = ohneMenge(text); if(!name) return;
+  const da = artikelZu(name);
+  const jetzt = new Date().toISOString();
+  try{
+    if(da){
+      const neu = { anzahl: (da.anzahl || 0) + 1, zuletzt: jetzt };
+      if(bereich && bereich !== da.bereich) neu.bereich = bereich;
+      state.artikel = state.artikel.map(a => a.id === da.id ? Object.assign({}, a, neu) : a);
+      const r = await sb.from("articles").update(neu).eq("id", da.id);
+      if(r.error) throw r.error;
+    }else{
+      const zeile = { household_id: state.membership.household_id, name:name, bereich: bereich || "", anzahl:1, zuletzt:jetzt };
+      const r = await sb.from("articles").insert(zeile).select("*").single();
+      if(r.error) throw r.error;
+      state.artikel = state.artikel.concat([r.data]);
+    }
+    datenSichern();
+  }catch(_){ /* der Artikelstamm ist Beiwerk — der Eintrag zählt */ }
+}
+
 // Den Ladenbereich übernehmen, den derselbe Artikel beim letzten Mal hatte.
 function bereichRaten(text){
   const kern = eintragKern(text);
   if(!kern) return "";
   const bereiche = ladenbereiche();
+  // Der Artikelstamm weiß es am besten.
+  const a = state.artikel.find(x => x.bereich && bereiche.indexOf(x.bereich) >= 0 && eintragKern(x.name) === kern);
+  if(a) return a.bereich;
   for(let i = state.listItems.length - 1; i >= 0; i--){
     const e = state.listItems[i];
     if(e.bereich && bereiche.indexOf(e.bereich) >= 0 && eintragKern(e.text) === kern) return e.bereich;
@@ -1490,7 +1534,7 @@ function datenSichern(){
       members: state.members, events: state.events,
       templates: state.templates, reminders: state.reminders,
       tasks: state.tasks, erledigt: state.erledigt,
-      lists: state.lists, listItems: state.listItems,
+      lists: state.lists, listItems: state.listItems, artikel: state.artikel,
       pantry: state.pantry, dishes: state.dishes, plan: state.plan,
       fenster: state.fenster
         ? { von: state.fenster.von.toISOString(), bis: state.fenster.bis.toISOString() }
@@ -1514,6 +1558,7 @@ function datenLaden(){
     state.erledigt   = d.erledigt   || [];
     state.lists      = d.lists      || [];
     state.listItems  = d.listItems  || [];
+    state.artikel    = d.artikel    || [];
     state.pantry     = d.pantry     || [];
     state.dishes     = d.dishes     || [];
     state.plan       = d.plan       || [];
@@ -1789,6 +1834,7 @@ function render(){
     (state.aufgabe ? dialogAufgabe() : "") +
     (state.eintrag ? dialogEintrag() : "") +
     (state.listeDialog ? dialogListe() : "") +
+    (state.artikelDialog ? dialogArtikel() : "") +
     (state.vorrat ? dialogVorrat() : "") +
     (state.gericht ? dialogGericht() : "") +
     (state.zutatDialog ? dialogZutat() : "") +
@@ -1990,7 +2036,9 @@ function topbar(){
         ? '<div class="viewtabs">' +
             state.lists.map(l => '<button data-act="liste-waehlen" data-id="' + l.id + '" aria-pressed="' +
               (!!aktiveListe() && aktiveListe().id === l.id) + '">' + esc(l.name) + '</button>').join("") +
-            (state.tablet ? "" : '<button data-act="liste-bearbeiten" aria-pressed="false" aria-label="Liste bearbeiten">' + ICON.stift(15) + '</button>' +
+            '<button data-act="liste-waehlen" data-id="' + ARTIKEL_REITER + '" aria-pressed="' + artikelAnsichtAktiv() + '">Artikel</button>' +
+            (state.tablet || artikelAnsichtAktiv() ? "" :
+              '<button data-act="liste-bearbeiten" aria-pressed="false" aria-label="Liste bearbeiten">' + ICON.stift(15) + '</button>' +
               '<button data-act="liste-neu" aria-pressed="false" title="Neue Liste">+</button>') +
           '</div>'
         : "") +
@@ -2298,7 +2346,46 @@ function eintragZeile(e){
   '</div>';
 }
 
+// Alles, was je auf der Einkaufsliste stand — nach Ladenbereichen.
+// Von hier aus wandert ein Artikel mit einem Tipp zurück auf die Liste.
+function artikelAnsicht(){
+  const such = suchText(state.kuecheSuche.trim());
+  const offen = aufDerListe();
+  const alle = state.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const zeigen = alle.filter(a => !such || suchText(a.name).indexOf(such) >= 0);
+  const bereiche = ladenbereiche();
+  const zeile = a => {
+    const drauf = !!offen[eintragKern(a.name)];
+    return '<div class="aufgabe eintrag artikel">' +
+      '<button class="aufgabe-haken" data-act="artikel-auf-liste" data-id="' + a.id + '"' + (drauf ? " disabled" : "") + '>' +
+        '<span class="kasten" aria-hidden="true">' + (drauf ? "&#10003;" : "+") + '</span>' +
+        '<span class="wort"><span class="titel">' + esc(a.name) + '</span>' +
+          '<span class="meta">' + (drauf ? "steht auf der Einkaufsliste" : (a.anzahl || 1) + "&times; gekauft") + '</span>' +
+        '</span>' +
+      '</button>' +
+      '<button class="btn icon ghost" data-act="artikel-oeffnen" data-id="' + a.id + '" aria-label="bearbeiten">' + ICON.stift(18) + '</button>' +
+    '</div>';
+  };
+  let inhalt = "";
+  if(!alle.length){
+    inhalt = '<p class="empty">Noch keine Artikel. Alles, was du auf die Einkaufsliste setzt, sammelt sich hier — auch nachdem du es abgehakt und entfernt hast.</p>';
+  }else if(!zeigen.length){
+    inhalt = '<p class="empty">Nichts gefunden.</p>';
+  }else{
+    bereiche.concat([""]).forEach(function(b){
+      const drin = zeigen.filter(a => b ? a.bereich === b : bereiche.indexOf(a.bereich) < 0);
+      if(drin.length) inhalt += '<div class="field"><label>' + esc(b || "Ohne Bereich") + '</label>' + drin.map(zeile).join("") + '</div>';
+    });
+  }
+  return '<div class="agenda" style="max-width:640px">' +
+    '<p class="hint" style="margin:0">Der Artikelstamm: gelöschte Einträge bleiben hier erhalten, samt Ladenbereich. Antippen setzt einen Artikel wieder auf die Einkaufsliste.</p>' +
+    (alle.length > 8 ? kuecheSuchfeld("Artikel suchen") : "") +
+    '<div id="kueche-treffer">' + inhalt + '</div>' +
+  '</div>';
+}
+
 function listenAnsicht(){
+  if(artikelAnsichtAktiv()) return artikelAnsicht();
   const liste = aktiveListe();
   if(!liste){
     return '<div class="agenda" style="max-width:640px">' +
@@ -3186,10 +3273,9 @@ function zutatZeile(z){
 // je Zutat nur eine Schreibweise.
 function bekannteNamen(){
   const gesehen = {}, namen = [];
-  state.pantry.map(p => p.name)
+  state.artikel.slice().sort((a, b) => (b.anzahl || 0) - (a.anzahl || 0)).map(a => a.name)
+    .concat(state.pantry.map(p => p.name))
     .concat(...state.dishes.map(g => zutatenVon(g).map(z => z.name)))
-    // Was schon einmal auf einer Liste stand, ist auch ein guter Vorschlag.
-    .concat(state.listItems.map(e => e.text))
     .forEach(n => { const k = eintragKern(n); if(k && !gesehen[k]){ gesehen[k] = true; namen.push(n); } });
   return namen;
 }
@@ -3417,6 +3503,24 @@ function dialogWuerfel(){
   '</div></div>';
 }
 
+function dialogArtikel(){
+  const a = state.artikelDialog;
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="artikel-speichern">' +
+    '<h2>Artikel</h2>' +
+    '<div class="field"><label for="ar-name">Name</label><input id="ar-name" type="text" value="' + esc(a.name) + '" required></div>' +
+    '<div class="field"><label for="ar-bereich">Ladenbereich</label><select id="ar-bereich">' +
+      '<option value="">Ohne Bereich</option>' +
+      ladenbereiche().map(b => '<option value="' + esc(b) + '"' + (a.bereich === b ? " selected" : "") + '>' + esc(b) + '</option>').join("") +
+    '</select><span class="hint">Gilt für neue Einträge auf der Einkaufsliste.</span></div>' +
+    '<div class="actions">' +
+      '<button class="btn danger" type="button" data-act="artikel-loeschen">Löschen</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
 function dialogListe(){
   const l = state.listeDialog;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="liste-speichern">' +
@@ -3583,7 +3687,7 @@ function overlayChronikLoesen(){
 function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
             state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe ||
-            state.eintrag || state.listeDialog || state.vorrat || state.gericht || state.zutatDialog ||
+            state.eintrag || state.listeDialog || state.artikelDialog || state.vorrat || state.gericht || state.zutatDialog ||
             state.planDialog || state.heuteKochen || state.wochenEinkauf || state.wuerfel);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
@@ -3606,6 +3710,7 @@ function obersteSchliessen(){
   else if(state.wochenEinkauf) state.wochenEinkauf = null;
   else if(state.wuerfel)       state.wuerfel = null;
   else if(state.listeDialog)   state.listeDialog = null;
+  else if(state.artikelDialog) state.artikelDialog = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
   else if(state.suche)         state.suche = null;
@@ -3617,7 +3722,7 @@ function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
-  state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+  state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
   overlayChronikLoesen();
   render();
@@ -3629,7 +3734,7 @@ window.addEventListener("popstate", function(){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
-    state.eintrag = null; state.listeDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+    state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
     render();
   }
@@ -3797,7 +3902,15 @@ async function aktion(act, el){
     case "liste-waehlen":
       state.listeAktiv = el.dataset.id;
       localStorage.setItem("fp.liste", state.listeAktiv);
+      state.kuecheSuche = "";
       return render();
+    case "artikel-auf-liste": return artikelAufListe(el.dataset.id);
+    case "artikel-oeffnen": {
+      const a = state.artikel.find(x => x.id === el.dataset.id); if(!a) return;
+      state.artikelDialog = { id:a.id, name:a.name, bereich:a.bereich || "" };
+      overlayOeffnen(); return render();
+    }
+    case "artikel-loeschen": return artikelLoeschen();
     case "liste-neu": return listeAnlegen();
     case "liste-bearbeiten": {
       const l = aktiveListe(); if(!l) return;
@@ -3972,6 +4085,7 @@ document.addEventListener("submit", async function(e){
     if(act === "aufgabe-speichern") return await aufgabeSpeichern();
     if(act === "eintrag-neu")       return await eintragHinzufuegen();
     if(act === "eintrag-speichern") return await eintragSpeichern();
+    if(act === "artikel-speichern") return await artikelSpeichern();
     if(act === "vorrat-neu")        return await vorratSchnell();
     if(act === "vorrat-speichern")  return await vorratSpeichern();
     if(act === "gericht-speichern") return await gerichtSpeichern();
@@ -4485,27 +4599,96 @@ async function eintragHinzufuegen(){
   const feld = $("#eintrag-text"), sel = $("#eintrag-bereich");
   const text = (feld ? feld.value : "").trim();
   if(!text) return;
-  const zeile = {
-    household_id: state.membership.household_id, list_id: liste.id, text: text,
-    bereich: liste.ist_einkauf ? ((sel && sel.value) || bereichRaten(text)) : ""
-  };
+  // Mit Beistrich getrennt: „Milch, Brot, 2 Butter“ ergibt drei Einträge.
+  const teile = text.split(/[,;]+/).map(t => t.trim()).filter(Boolean);
+  const gewaehlt = (sel && sel.value) || "";
+  const zeilen = teile.map(t => ({
+    household_id: state.membership.household_id, list_id: liste.id, text: t,
+    bereich: liste.ist_einkauf ? (bereichRaten(t) || (teile.length === 1 ? gewaehlt : "")) : ""
+  }));
+  // Von Hand gewählter Bereich schlägt das Geratene, solange es nur einer ist.
+  if(liste.ist_einkauf && gewaehlt && teile.length === 1) zeilen[0].bereich = gewaehlt;
+
   // Sofort zeigen und das Feld leeren — beim Einkaufen tippt man mehrere hintereinander.
-  const vorlaeufig = Object.assign({ id:"neu-" + Date.now(), erledigt:false, created_at:new Date().toISOString() }, zeile);
-  state.listItems = state.listItems.concat([vorlaeufig]);
+  const vorlaeufig = zeilen.map((z, i) => Object.assign(
+    { id:"neu-" + Date.now() + "-" + i, erledigt:false, created_at:new Date().toISOString() }, z));
+  state.listItems = state.listItems.concat(vorlaeufig);
   state.entwurf = "";
   render();
   setTimeout(function(){ const f = $("#eintrag-text"); if(f) f.focus(); }, 20);
   try{
+    const r = await sb.from("list_items").insert(zeilen).select("*");
+    if(r.error) throw r.error;
+    const neu = Array.isArray(r.data) ? r.data : [r.data];
+    if(neu.length === vorlaeufig.length){
+      state.listItems = state.listItems.map(e => {
+        const i = vorlaeufig.indexOf(e);
+        return i >= 0 ? Object.assign({}, e, neu[i]) : e;
+      });
+    }else{
+      await listenLaden();
+    }
+    datenSichern();
+    if(liste.ist_einkauf) for(const z of zeilen) await artikelMerken(z.text, z.bereich);
+  }catch(err){
+    state.listItems = state.listItems.filter(e => vorlaeufig.indexOf(e) < 0);
+    state.entwurf = text;
+    setToast(fehlerText(err));
+  }
+  render();
+}
+
+// Aus dem Artikelstamm zurück auf die Einkaufsliste.
+async function artikelAufListe(id){
+  const a = state.artikel.find(x => x.id === id); if(!a) return;
+  const liste = einkaufsliste();
+  if(!liste){ setToast("Es gibt noch keine Einkaufsliste"); return; }
+  if(aufDerListe()[eintragKern(a.name)]) return;
+  const zeile = { household_id: state.membership.household_id, list_id: liste.id, text: a.name, bereich: a.bereich || "" };
+  const vorlaeufig = Object.assign({ id:"neu-" + Date.now(), erledigt:false, created_at:new Date().toISOString() }, zeile);
+  state.listItems = state.listItems.concat([vorlaeufig]);
+  render();
+  try{
     const r = await sb.from("list_items").insert(zeile).select("*").single();
     if(r.error) throw r.error;
     state.listItems = state.listItems.map(e => e === vorlaeufig ? Object.assign({}, vorlaeufig, r.data) : e);
+    await artikelMerken(a.name, a.bereich);
     datenSichern();
+    setToast("„" + a.name + "“ steht auf der Einkaufsliste");
   }catch(err){
     state.listItems = state.listItems.filter(e => e !== vorlaeufig);
-    state.entwurf = text;
     setToast(fehlerText(err));
-    render();
   }
+  render();
+}
+
+async function artikelSpeichern(){
+  const d = state.artikelDialog; if(!d) return;
+  const nameFeld = $("#ar-name"), bFeld = $("#ar-bereich");
+  const name = (nameFeld ? nameFeld.value : d.name).trim();
+  const bereich = bFeld ? bFeld.value : d.bereich;
+  if(!name) return;
+  try{
+    const r = await sb.from("articles").update({ name:name, bereich:bereich }).eq("id", d.id);
+    if(r.error) throw r.error;
+    state.artikel = state.artikel.map(a => a.id === d.id ? Object.assign({}, a, { name:name, bereich:bereich }) : a);
+    state.artikelDialog = null; chronikPruefen();
+    datenSichern();
+  }catch(err){ setToast(err && err.code === "23505" ? "Diesen Artikel gibt es schon." : fehlerText(err)); }
+  render();
+}
+async function artikelLoeschen(){
+  const d = state.artikelDialog; if(!d) return;
+  const ja = await frage({ titel:"Artikel vergessen?", text:"„" + d.name + "“ verschwindet aus dem Artikelstamm. Einträge auf der Einkaufsliste bleiben.", knopf:"Löschen", gefahr:true });
+  if(!ja) return;
+  try{
+    const r = await sb.from("articles").delete().eq("id", d.id);
+    if(r.error) throw r.error;
+    state.artikel = state.artikel.filter(a => a.id !== d.id);
+    state.artikelDialog = null; chronikPruefen();
+    datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
 }
 
 async function eintragUmschalten(id){
