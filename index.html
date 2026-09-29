@@ -341,10 +341,13 @@ button.pill:hover{filter:brightness(1.08)}
 .plantag-kopf span{font-weight:700;font-size:15px}
 .plantag-kopf small{color:var(--muted);font-size:13px;flex:1 1 auto}
 .plantag-kopf .btn{align-self:center}
-.planzeile{display:flex;align-items:flex-start;gap:8px;border-top:1px solid var(--line);padding:2px 0}
-.planzeile .mz{flex:0 0 58px;padding-top:11px;font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-.planzeile .mzinhalt{flex:1 1 auto;min-width:0}
-.planzeile .planeintrag{border-top:none;margin-top:0;padding-top:0}
+.plantag.vorrat{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.plantag.vorrat .plantag-kopf span{color:var(--accent)}
+.plantag.leer .plantag-kopf{opacity:.75}
+.planeintrag .gekocht{color:var(--accent)}
+.tafelvorrat{display:flex;flex-direction:column;gap:2px;margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.tafelvorrat b{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+.tafelvorrat span{font-size:15px;font-weight:600}
 .mzleer{
   display:block;width:100%;text-align:left;padding:9px 0;border:none;background:none;
   font:inherit;font-size:14px;color:var(--muted);cursor:pointer;
@@ -659,7 +662,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-27 20:38";
+const FASSUNG = "2026-09-29 18:45";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2640,19 +2643,20 @@ function zutatenAnsicht(){
 function zuletztGegessen(g){
   const heute = ymd(new Date());
   let t = null;
-  state.plan.forEach(e => { if(e.gericht_id === g.id && e.tag <= heute && (!t || e.tag > t)) t = e.tag; });
+  state.plan.forEach(e => { if(e.gericht_id === g.id && !istVorrat(e) && e.tag <= heute && (!t || e.tag > t)) t = e.tag; });
   return t ? parseYmd(t) : null;
 }
 function naechstGeplant(g){
   const heute = ymd(new Date());
   let t = null;
-  state.plan.forEach(e => { if(e.gericht_id === g.id && e.tag > heute && (!t || e.tag < t)) t = e.tag; });
+  state.plan.forEach(e => { if(e.gericht_id === g.id && !istVorrat(e) && e.tag > heute && (!t || e.tag < t)) t = e.tag; });
   return t ? parseYmd(t) : null;
 }
 function tageSeit(d){ return Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000); }
 function seitText(g){
   const n = naechstGeplant(g);
   if(n) return "geplant " + tagKurz(n);
+  if(imVorrat(g)) return "diese Woche geplant";
   const z = zuletztGegessen(g);
   if(!z) return "noch nie gekocht";
   const t = tageSeit(z);
@@ -2665,7 +2669,7 @@ function seitText(g){
 // Gegessen oder geplant innerhalb von ±tage?
 function kuerzlich(g, tage){
   const z = zuletztGegessen(g), n = naechstGeplant(g);
-  return (z && tageSeit(z) < tage) || (n && -tageSeit(n) < tage);
+  return imVorrat(g) || (z && tageSeit(z) < tage) || (n && -tageSeit(n) < tage);
 }
 
 // Würfel: bevorzugt, was lange nicht dran war, was ganz im Haus ist und
@@ -2686,11 +2690,21 @@ function wuerfeln(ohne){
   return pool[pool.length - 1];
 }
 
-const MAHLZEITEN = [["mittag","Mittag"],["abend","Abend"]];
-function planAm(tag, mahlzeit){
+// Ein Eintrag hängt entweder an einem Tag oder im Vorrat der Woche
+// („woche“, verankert am Montag) — geplant, aber ohne festes Datum.
+function istVorrat(e){ return e.mahlzeit === "woche"; }
+function planAm(tag){
   const t = ymd(tag);
-  return state.plan.filter(e => e.tag === t &&
-    (!mahlzeit || (mahlzeit === "extra" ? ["mittag","abend"].indexOf(e.mahlzeit || "abend") < 0 : (e.mahlzeit || "abend") === mahlzeit)));
+  return state.plan.filter(e => e.tag === t && !istVorrat(e));
+}
+function planVorrat(montag){
+  const t = ymd(montag);
+  return state.plan.filter(e => e.tag === t && istVorrat(e));
+}
+// Steht das Gericht im Vorrat dieser oder einer kommenden Woche?
+function imVorrat(g){
+  const mo = ymd(mondayOf(new Date()));
+  return state.plan.some(e => istVorrat(e) && e.gericht_id === g.id && e.tag >= mo);
 }
 function planGericht(e){ return e.gericht_id ? state.dishes.find(g => g.id === e.gericht_id) || null : null; }
 function planName(e){ const g = planGericht(e); return g ? g.name : (e.text || "?"); }
@@ -2704,11 +2718,14 @@ function tagKurz(d){ return WDS[(d.getDay()+6)%7] + ", " + d.getDate() + "." + (
 
 function planEintragZeile(e){
   const g = planGericht(e), st = g ? zutatenStand(g) : null;
+  const heuteSchon = !istVorrat(e) && e.tag === ymd(new Date());
   return '<div class="planeintrag">' +
     (g ? '<button class="pname" data-act="gericht-oeffnen" data-id="' + g.id + '">' : '<span class="pname notiz">') +
       '<b>' + esc(planName(e)) + '</b>' +
       (st && st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : "") +
     (g ? '</button>' : '</span>') +
+    (heuteSchon ? "" : '<button class="btn icon ghost gekocht" data-act="plan-gekocht" data-id="' + e.id +
+      '" aria-label="heute gekocht" title="heute gekocht">&#10003;</button>') +
     '<button class="btn icon ghost" data-act="plan-weg" data-id="' + e.id + '" aria-label="aus dem Plan nehmen">&#10005;</button>' +
   '</div>';
 }
@@ -2727,29 +2744,27 @@ function essensplanAnsicht(){
     '<button class="btn" data-act="wochen-einkauf">Einkauf für die Woche</button>' +
     (state.dishes.length ? '<button class="btn" data-act="wuerfeln">&#127922; Würfeln</button>' : "") +
   '</div>';
-  // Mittag und Abend stehen immer da, auch wenn nichts geplant ist.
-  // Das Plus in der Zeile füllt sie, das Plus oben hängt eine weitere an.
-  const mahlzeit = (d, m, name) => {
-    const eintraege = planAm(d, m);
-    return '<div class="planzeile">' +
-      '<span class="mz">' + name + '</span>' +
-      '<div class="mzinhalt">' +
-        (eintraege.length ? eintraege.map(planEintragZeile).join("")
-          : '<button class="mzleer" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="' + m + '">+ Essen wählen</button>') +
-      '</div>' +
-      (eintraege.length ? '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="' + m + '" aria-label="' + name + ': noch etwas">' + ICON.plus(16) + '</button>' : "") +
-    '</div>';
-  };
+  // Der Vorrat der Woche: geplant, aber ohne festen Tag. Gekocht wird,
+  // worauf ihr Lust habt — der Haken setzt das Gericht auf heute.
+  const vorrat = planVorrat(mo);
+  const vorratBlock = '<div class="plantag vorrat">' +
+    '<div class="plantag-kopf"><span>Diese Woche</span><small>ohne festen Tag</small>' +
+      '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(mo) + '" data-m="woche" aria-label="Essen einplanen">' + ICON.plus(18) + '</button></div>' +
+    (vorrat.length ? vorrat.map(planEintragZeile).join("")
+      : '<button class="mzleer" data-act="plan-neu" data-tag="' + ymd(mo) + '" data-m="woche">+ Essen für diese Woche</button>') +
+  '</div>';
   const tag = d => {
-    const extra = planAm(d, "extra");
-    return '<div class="plantag' + (sameDay(d, heute) ? " heute" : "") + (d < heute ? " vorbei" : "") + '">' +
+    const eintraege = planAm(d);
+    return '<div class="plantag' + (sameDay(d, heute) ? " heute" : "") + (d < heute ? " vorbei" : "") +
+        (eintraege.length ? "" : " leer") + '">' +
       '<div class="plantag-kopf"><span>' + WDLANG[(d.getDay()+6)%7] + '</span><small>' + d.getDate() + ". " + MONATE[d.getMonth()] + '</small>' +
-        '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="extra" aria-label="Weitere Zeile">' + ICON.plus(18) + '</button></div>' +
-      MAHLZEITEN.map(m => mahlzeit(d, m[0], m[1])).join("") +
-      (extra.length ? '<div class="planzeile"><span class="mz"></span><div class="mzinhalt">' + extra.map(planEintragZeile).join("") + '</div></div>' : "") +
+        '<button class="btn icon ghost" data-act="plan-neu" data-tag="' + ymd(d) + '" data-m="abend" aria-label="An diesem Tag einplanen">' + ICON.plus(18) + '</button></div>' +
+      eintraege.map(planEintragZeile).join("") +
     '</div>';
   };
-  return '<div class="agenda" style="max-width:720px">' + kopf + knoepfe + tage.map(tag).join("") + '</div>';
+  return '<div class="agenda" style="max-width:720px">' + kopf + knoepfe + vorratBlock +
+    '<span class="hint">Feste Tage nur für das, was wirklich feststeht.</span>' +
+    tage.map(tag).join("") + '</div>';
 }
 
 /* =========================================================
@@ -2777,12 +2792,16 @@ function tafelAnsicht(){
   const aufgaben = aufgabenAn(heute);
   const offen = aufgaben.filter(a => !abgehakt(a, heute)), fertig = aufgaben.filter(a => abgehakt(a, heute));
   const mo = mondayOf(heute);
+  const vorrat = planVorrat(mo);
   const essen = [0,1,2,3,4,5,6].map(i => addDays(mo, i)).map(d => {
     const e = planAm(d);
     return '<div class="tafelessen' + (sameDay(d, heute) ? " heute" : "") + (d < startOfDay(heute) ? " vorbei" : "") + '">' +
       '<span class="wt">' + WDS[(d.getDay()+6)%7] + '</span>' +
       '<span class="g">' + (e.length ? esc(e.map(planName).join(" · ")) : "—") + '</span></div>';
-  }).join("");
+  }).join("") +
+  // Steht für heute nichts fest, zeigt die Tafel, was für die Woche geplant ist.
+  (vorrat.length && !planAm(heute).length ? '<div class="tafelvorrat"><b>Diese Woche geplant</b>' +
+      vorrat.map(e => '<span>' + esc(planName(e)) + '</span>').join("") + '</div>' : "");
   const einkauf = einkaufsliste(), nochOffen = einkauf ? eintraegeVon(einkauf).filter(e => !e.erledigt).length : 0;
   // Am Handy sieht man Uhrzeit und Datum ohnehin im Gerät.
   return '<div class="tafel">' +
@@ -2854,9 +2873,10 @@ function rail(){
       ? '<div class="railsec"><h2>Aufgaben heute</h2>' +
           offeneAufgaben.map(a => aufgabeZeile(a, heute, true)).join("") + '</div>'
       : "") +
-    (planAm(heute).length
-      ? '<div class="railsec"><h2>Essen heute</h2>' +
-          planAm(heute).map(e => '<span class="railessen">' + esc(planName(e)) + '</span>').join("") + '</div>'
+    (planAm(heute).length || planVorrat(mondayOf(heute)).length
+      ? '<div class="railsec"><h2>' + (planAm(heute).length ? "Essen heute" : "Diese Woche geplant") + '</h2>' +
+          (planAm(heute).length ? planAm(heute) : planVorrat(mondayOf(heute)))
+            .map(e => '<span class="railessen">' + esc(planName(e)) + '</span>').join("") + '</div>'
       : "") +
     blk("Morgen · " + morgen.getDate() + ". " + MONATE[morgen.getMonth()], morgen) +
   '</aside>';
@@ -3398,7 +3418,7 @@ function planTreffer(){
 function dialogPlan(){
   const d = state.planDialog, tag = parseYmd(d.tag);
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-notiz">' +
-    '<h2>' + (d.mahlzeit === "mittag" ? "Mittag" : d.mahlzeit === "abend" ? "Abend" : "Essen") + ' am ' + tagKurz(tag) + '</h2>' +
+    '<h2>' + (d.mahlzeit === "woche" ? "Essen für diese Woche" : "Essen am " + tagKurz(tag)) + '</h2>' +
     '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder Notiz („Reste“)" autocomplete="off">' +
     '<div class="auswahlliste" id="plan-treffer">' + planTreffer() + '</div>' +
     '<div class="actions">' +
@@ -3440,7 +3460,7 @@ function dialogHeuteKochen(){
 function wochenBedarf(){
   const mo = planMontag(), heute = ymd(new Date()), bis = ymd(addDays(mo, 6)), von = ymd(mo) > heute ? ymd(mo) : heute;
   const da = aufDerListe(), nach = {};
-  state.plan.filter(e => e.tag >= von && e.tag <= bis).forEach(e => {
+  state.plan.filter(e => istVorrat(e) ? e.tag === ymd(mo) : (e.tag >= von && e.tag <= bis)).forEach(e => {
     const g = planGericht(e); if(!g) return;
     zutatenVon(g).forEach(z => {
       const k = eintragKern(z.name); if(!k) return;
@@ -3805,7 +3825,7 @@ async function aktion(act, el){
       if(b === "aufgaben"){ state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render(); }
       if(b === "kueche"){
         if(state.view === "gerichte") state.gericht = neuesGericht(null);
-        else if(state.view === "essen") state.planDialog = { tag: ymd(planStandardTag()), mahlzeit:"abend", suche:"" };
+        else if(state.view === "essen") state.planDialog = { tag: ymd(planMontag()), mahlzeit:"woche", suche:"" };
         else state.vorrat = { id:null, name:"", bereich:"" };
         overlayOeffnen(); return render();
       }
@@ -3955,6 +3975,7 @@ async function aktion(act, el){
       return;
     case "plan-gericht": return planEintragen(state.planDialog.tag, el.dataset.id, "", state.planDialog.mahlzeit);
     case "plan-weg": return planEntfernen(el.dataset.id);
+    case "plan-gekocht": return planGekocht(el.dataset.id);
     case "plan-als-notiz": {
       const t = (($("#plan-suche") || {}).value || "").trim();
       return t ? planEintragen(state.planDialog.tag, null, t, state.planDialog.mahlzeit) : undefined;
@@ -4907,6 +4928,23 @@ async function planEintragen(tag, gerichtId, text, mahlzeit){
   }
   render();
 }
+// Heute gekocht: Der Eintrag wandert auf den heutigen Tag. Damit stimmt,
+// was „zuletzt gegessen“ sagt — und der Würfel rechnet richtig.
+async function planGekocht(id){
+  const e = state.plan.find(x => x.id === id); if(!e) return;
+  const heute = ymd(new Date());
+  const neu = { tag: heute, mahlzeit: "abend" };
+  state.plan = state.plan.map(x => x.id === id ? Object.assign({}, x, neu) : x);
+  render();
+  try{
+    const r = await sb.from("meal_plan").update(neu).eq("id", id);
+    if(r.error) throw r.error;
+    datenSichern();
+    setToast("„" + planName(e) + "“ als heute gekocht vermerkt");
+  }catch(err){ await kuecheLaden(); setToast(fehlerText(err)); }
+  render();
+}
+
 async function planEntfernen(id){
   const e = state.plan.find(x => x.id === id); if(!e) return;
   state.plan = state.plan.filter(x => x !== e);
