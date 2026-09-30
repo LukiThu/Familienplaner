@@ -657,7 +657,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-30 22:06";
+const FASSUNG = "2026-09-30 22:20";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1805,6 +1805,9 @@ function render(){
   const alterInhalt = $(".content");
   const schluessel = scrollSchluessel();
   const scrollStand = alterInhalt && letzteAnsicht === schluessel ? alterInhalt.scrollTop : 0;
+  // Auch offene Fenster sollen stehen bleiben: Speichert man mitten in den
+  // Einstellungen etwas, springt sonst alles wieder nach oben.
+  const fensterStand = $$(".backdrop").map(b => b.scrollTop);
   if(!sb){ app.innerHTML = viewConfigFehlt(); return; }
   if(!state.ready){ app.innerHTML = '<div class="center"><p class="hint">Wird geladen …</p></div>'; return; }
   if(!state.session){ app.innerHTML = viewLogin(); focusFirst(); return; }
@@ -1852,6 +1855,7 @@ function render(){
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
   const neuerInhalt = $(".content");
   if(neuerInhalt && scrollStand) neuerInhalt.scrollTop = scrollStand;
+  $$(".backdrop").forEach(function(b, i){ if(fensterStand[i]) b.scrollTop = fensterStand[i]; });
   letzteAnsicht = schluessel;
   if(state.frage && state.frage.feld !== null){
     setTimeout(function(){ const e = $("#frage-feld"); if(e){ e.focus(); e.select(); } }, 30);
@@ -3022,6 +3026,13 @@ function dialogEinstellungen(){
     '<h2>Einstellungen</h2>' +
     '<div class="field"><label for="st-hh">Haushalt</label>' +
       '<input id="st-hh" type="text" value="' + esc(state.household ? state.household.name : "") + '"></div>' +
+    // Ohne diese Zuordnung weiß die App nicht, wessen Vorlagen und
+    // Erinnerungen dir gehören.
+    '<div class="field"><label for="st-ich">Ich bin</label><select id="st-ich">' +
+      '<option value="">niemand (z. B. Wandtablet)</option>' +
+      personen().map(m => '<option value="' + m.id + '"' +
+        ((state.membership && state.membership.member_id) === m.id ? " selected" : "") + '>' + esc(m.name) + '</option>').join("") +
+    '</select><span class="hint">Danach zeigt die Vorlagenauswahl nur noch deine eigenen.</span></div>' +
     '<div class="field"><label>Familienmitglieder</label>' + (rows || '<p class="hint">Noch niemand angelegt.</p>') + '</div>' +
     '<div class="field"><label>Kategorien</label>' +
       (katRows || '<p class="hint">Keine. Praktisch für Termine, die keiner Person gehören — etwa Geburtstage.</p>') + '</div>' +
@@ -3169,8 +3180,7 @@ function sichtbareVorlagen(){
 function eigeneVorlagen(liste){
   const ich = state.membership ? state.membership.member_id : null;
   if(!ich || state.vorlagenAlle) return liste;
-  const meine = liste.filter(v => !(v.member_ids || []).length || v.member_ids.indexOf(ich) >= 0);
-  return meine.length ? meine : liste;
+  return liste.filter(v => !(v.member_ids || []).length || v.member_ids.indexOf(ich) >= 0);
 }
 
 function neueAufgabe(a){
@@ -3611,7 +3621,8 @@ async function suchen(){
 function neueVorlage(v){
   return v ? { id:v.id, titel:v.titel, member_ids:(v.member_ids || []).slice(),
                start_zeit:v.start_zeit, end_zeit:v.end_zeit }
-           : { id:null, titel:"", member_ids:[], start_zeit:"08:00", end_zeit:"16:00" };
+           : { id:null, titel:"", start_zeit:"08:00", end_zeit:"16:00",
+               member_ids: (state.membership && state.membership.member_id) ? [state.membership.member_id] : [] };
 }
 function vorlageLesen(){
   const v = state.vorlage; if(!v) return;
@@ -3659,11 +3670,12 @@ function dialogVorlagen(){
                 esc(v.titel) + '</span>' +
               '<span class="t">' + esc(v.start_zeit) + '–' + esc(v.end_zeit) + '</span>' +
             '</button>').join("")
-        : '<p class="empty">Keine Vorlagen. Anzulegen in den Einstellungen.</p>') +
+        : '<p class="empty">' + (alle.length ? "Keine eigenen Vorlagen." : "Noch keine Vorlagen.") + '</p>') +
     '</div>' +
-    (alle.length > liste.length || state.vorlagenAlle
+    // Ohne Zuordnung „Ich bin …“ kann die App nicht wissen, was deins ist.
+    (state.membership && state.membership.member_id
       ? '<label class="check"><input type="checkbox" data-act="vorlagen-alle"' + (state.vorlagenAlle ? " checked" : "") + '> Auch die Vorlagen der anderen</label>'
-      : "") +
+      : '<span class="hint">Damit hier nur deine Vorlagen stehen: in den Einstellungen unter „Ich bin“ deine Person wählen.</span>') +
     '<div class="actions">' +
       '<button class="btn" type="button" data-act="vorlage-neu">+ Vorlage</button>' +
       '<span class="spacer"></span>' +
@@ -5223,11 +5235,21 @@ async function einstellungenSpeichern(){
   })).filter(b => b.neu);
   const bereicheNeu = bereichZeilen.map(b => b.neu).filter((b, i, a) => a.indexOf(b) === i);
 
+  // Immer vor dem Neuzeichnen lesen — render() ersetzt die Felder.
+  const ichFeld = document.getElementById("st-ich");
+  const ichId = ichFeld ? (ichFeld.value || null) : undefined;
+
   state.busy = true; render();
   try{
     if(hhName && state.household && hhName !== state.household.name){
       const r = await sb.from("households").update({ name: hhName }).eq("id", state.household.id);
       if(r.error) throw r.error;
+    }
+    if(ichId !== undefined && state.membership && ichId !== (state.membership.member_id || null)){
+      const r = await sb.from("memberships").update({ member_id: ichId })
+        .eq("user_id", state.session.user.id);
+      if(r.error) throw r.error;
+      state.membership = Object.assign({}, state.membership, { member_id: ichId });
     }
     for(const g of gelesen){
       const m = memberById(g.id);
