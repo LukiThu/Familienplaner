@@ -662,7 +662,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-29 18:45";
+const FASSUNG = "2026-09-30 09:00";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -4216,6 +4216,7 @@ document.addEventListener("touchend", function(e){
 }, { passive:true });
 
 document.addEventListener("input", function(e){
+  if(e.target && state.dialog && (e.target.id === "ev-vd" || e.target.id === "ev-vt")) return endeNachziehen();
   // Beim Tippen nicht die ganze Seite neu zeichnen: Das Eingabefeld würde
   // dabei ersetzt, und auf langsamen Geräten gehen so Zeichen verloren.
   // Stattdessen kurz abwarten und nur die Trefferliste austauschen.
@@ -4241,8 +4242,36 @@ document.addEventListener("input", function(e){
   }
 });
 
+// Wird der Beginn verschoben, wandert das Ende mit — die eingestellte
+// Dauer bleibt. Bei einem neuen Termin ist das eine Stunde; so entstehen
+// keine Termine, die vor ihrem Anfang enden.
+function endeNachziehen(){
+  const d = state.dialog; if(!d) return;
+  const vd = $("#ev-vd"), vt = $("#ev-vt"), bd = $("#ev-bd"), bt = $("#ev-bt");
+  if(!vd || !bd) return;
+  // Halb getippte Felder ignorieren.
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(vd.value) || +vd.value.slice(0,4) < 1900) return;
+  if(vt && vt.value && !/^\d{2}:\d{2}/.test(vt.value)) return;
+  const neuStart = fromInputs(vd.value, vt ? vt.value : "00:00");
+  // Der Beginn von vorhin steht noch im Zustand, das Ende im Feld —
+  // dort kann es der Nutzer gerade selbst gesetzt haben.
+  const altStart = fromInputs(d.vd, d.ganztags ? "00:00" : d.vt);
+  const altEnde  = fromInputs(bd.value, (!d.ganztags && bt) ? bt.value : "00:00");
+  let dauer = altEnde - altStart;
+  if(isNaN(dauer)) dauer = 3600000;
+  if(dauer === 0 && !d.ganztags) dauer = 3600000;
+  let neuEnde = new Date(neuStart.getTime() + dauer);
+  // Endet es vor dem Beginn, ist der Folgetag gemeint (Nachtdienst).
+  while(neuEnde < neuStart || (!d.ganztags && neuEnde.getTime() === neuStart.getTime()))
+    neuEnde = new Date(neuEnde.getTime() + 86400000);
+  bd.value = ymd(neuEnde); d.bd = bd.value;
+  if(!d.ganztags && bt){ bt.value = hm(neuEnde); d.bt = bt.value; }
+  d.vd = vd.value; if(vt) d.vt = vt.value;
+}
+
 document.addEventListener("change", function(e){
   if(e.target && e.target.id === "eintrag-bereich") e.target.dataset.vonHand = "1";
+  if(e.target && state.dialog && (e.target.id === "ev-vd" || e.target.id === "ev-vt")) endeNachziehen();
   // Wiederholung: nur das Enddatum ein- oder ausblenden. Kein Neuzeichnen —
   // das würde dem Gerät das Feld unter der offenen Auswahlliste wegziehen.
   if(e.target && e.target.id === "ev-wdh" && state.dialog){
