@@ -540,11 +540,6 @@ button.pill:hover{filter:brightness(1.08)}
 .vzeile .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vzeile .who{font-weight:800;opacity:.8}
 .vzeile .t{flex:none;font-size:13.5px;opacity:.8;font-variant-numeric:tabular-nums}
-.vorlagerow{display:flex;gap:7px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.vorlagerow:last-of-type{border-bottom:none}
-.vorlagerow .nm{flex:2 1 110px;min-width:0}
-.vorlagerow select{flex:1 1 110px;min-width:0}
-.vorlagerow .zt{flex:0 0 108px}
 
 .memberrow{display:flex;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
 .memberrow:last-of-type{border-bottom:none}
@@ -662,7 +657,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-30 09:00";
+const FASSUNG = "2026-09-30 22:06";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -743,7 +738,7 @@ const state = {
   cursor: new Date(),
   hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
-  dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false,
+  dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false, vorlagenAlle:false, vorlage:null,
   frage:null, ladefehler:null, tablet: localStorage.getItem("fp.tablet") === "1",
   offline: (typeof navigator !== "undefined" && navigator.onLine === false), stand:null,
   authError:null, busy:false, toast:null
@@ -1779,6 +1774,7 @@ function renderImHintergrund(){
   if(state.dialog && $("#ev-titel")) dialogLesen();
   if(state.aufgabe && $("#auf-titel")) aufgabeLesen();
   if(state.eintrag && $("#ein-text")) eintragLesen();
+  if(state.vorlage && $("#vl-titel")) vorlageLesen();
   if(state.vorrat && $("#vo-name")) vorratLesen();
   if(state.gericht && $("#ge-name")) gerichtLesen();
   if(state.zutatDialog && $("#zu-ziel")) state.zutatDialog.ziel = $("#zu-ziel").value;
@@ -1850,6 +1846,7 @@ function render(){
     (state.vorlagenListe ? dialogVorlagen() : "") +
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
+    (state.vorlage ? dialogVorlage() : "") +
     (state.importer ? dialogImport() : "") +
     (state.frage ? dialogFrage() : "") +
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
@@ -2997,18 +2994,13 @@ function dialogEinstellungen(){
   const z = state.zaehler;
   const importierte = z ? z.importiert : 0;
   const gesamt = z ? z.gesamt : 0;
+  // Jede Vorlage öffnet ihr eigenes kleines Fenster — keine Zeilen zum
+  // Ausfüllen mitten in den Einstellungen.
   const vorlagenZeilen = state.templates.map(v =>
-    '<div class="vorlagerow" data-vid="' + v.id + '">' +
-      '<input class="nm" type="text" value="' + esc(v.titel) + '" data-f="titel" aria-label="Titel">' +
-      '<select data-f="member" aria-label="Für wen">' +
-        '<option value=""' + (!v.member_ids.length ? " selected" : "") + '>niemand</option>' +
-        state.members.map(m =>
-          '<option value="' + m.id + '"' + (v.member_ids[0] === m.id ? " selected" : "") + '>' + esc(m.name) + '</option>').join("") +
-      '</select>' +
-      '<input class="zt" type="time" value="' + esc(v.start_zeit) + '" data-f="start_zeit" aria-label="von">' +
-      '<input class="zt" type="time" value="' + esc(v.end_zeit) + '" data-f="end_zeit" aria-label="bis">' +
-      '<button class="btn icon danger" type="button" data-act="vorlage-weg" data-id="' + v.id + '" aria-label="entfernen">✕</button>' +
-    '</div>').join("");
+    '<button class="vzeile" type="button" data-act="vorlage-oeffnen" data-id="' + v.id + '" style="' + farbenOf(v) + '">' +
+      '<span class="n">' + (kuerzelOf(v) ? '<span class="who">' + esc(kuerzelOf(v)) + '</span> ' : "") + esc(v.titel) + '</span>' +
+      '<span class="t">' + esc(v.start_zeit) + '–' + esc(v.end_zeit) + '</span>' +
+    '</button>').join("");
 
   // Am Wandtablet nur das Nötige zeigen: dort kommen auch die Kinder hin.
   if(state.tablet){
@@ -3171,6 +3163,14 @@ function sichtbareVorlagen(){
     if(!ids.length || !state.hidden.size) return true;
     return ids.some(id => !state.hidden.has(id));
   });
+}
+// Beim Eintragen zeigt die App nur die eigenen Vorlagen und die ohne
+// Person. Das Wandtablet gehört zu niemandem — dort bleiben alle stehen.
+function eigeneVorlagen(liste){
+  const ich = state.membership ? state.membership.member_id : null;
+  if(!ich || state.vorlagenAlle) return liste;
+  const meine = liste.filter(v => !(v.member_ids || []).length || v.member_ids.indexOf(ich) >= 0);
+  return meine.length ? meine : liste;
 }
 
 function neueAufgabe(a){
@@ -3608,9 +3608,45 @@ async function suchen(){
   const f = $("#such-feld"); if(f) f.focus();
 }
 
+function neueVorlage(v){
+  return v ? { id:v.id, titel:v.titel, member_ids:(v.member_ids || []).slice(),
+               start_zeit:v.start_zeit, end_zeit:v.end_zeit }
+           : { id:null, titel:"", member_ids:[], start_zeit:"08:00", end_zeit:"16:00" };
+}
+function vorlageLesen(){
+  const v = state.vorlage; if(!v) return;
+  const t = $("#vl-titel"); if(t) v.titel = t.value;
+  const a = $("#vl-von");   if(a) v.start_zeit = a.value;
+  const e = $("#vl-bis");   if(e) v.end_zeit = e.value;
+}
+function dialogVorlage(){
+  const v = state.vorlage;
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="vorlage-speichern">' +
+    '<h2>' + (v.id ? "Vorlage" : "Neue Vorlage") + '</h2>' +
+    '<div class="field"><label for="vl-titel">Titel</label>' +
+      '<input id="vl-titel" type="text" value="' + esc(v.titel) + '" placeholder="L1" required></div>' +
+    '<div class="field"><label>Für wen</label><div class="whopick">' +
+      personen().map(m =>
+        '<button type="button" data-act="vorlage-wer" data-id="' + m.id + '" aria-pressed="' + (v.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+          '<span class="dot"></span>' + esc(m.name) + '</button>').join("") +
+      '</div><span class="hint">Beim Eintragen zeigt die App zuerst die eigenen Vorlagen.</span></div>' +
+    '<div class="row">' +
+      '<div class="field"><label for="vl-von">Von</label><input id="vl-von" type="time" value="' + esc(v.start_zeit) + '"></div>' +
+      '<div class="field"><label for="vl-bis">Bis</label><input id="vl-bis" type="time" value="' + esc(v.end_zeit) + '"></div>' +
+    '</div>' +
+    '<span class="hint">Endet die Vorlage vor ihrem Beginn, gilt sie bis zum nächsten Tag — passend für Nachtdienste.</span>' +
+    '<div class="actions">' +
+      (v.id ? '<button class="btn danger" type="button" data-act="vorlage-weg" data-id="' + v.id + '">Löschen</button>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
 function dialogVorlagen(){
   const tag = parseYmd(state.tagDetail);
-  const liste = sichtbareVorlagen();
+  const alle = sichtbareVorlagen(), liste = eigeneVorlagen(alle);
   return '<div class="backdrop" data-act="backdrop"><div class="modal">' +
     '<h2>Vorlage einsetzen</h2>' +
     '<p class="small muted">für ' + WDLANG[(tag.getDay()+6)%7] + ', ' + tag.getDate() + '. ' + MONATE[tag.getMonth()] + '</p>' +
@@ -3625,7 +3661,12 @@ function dialogVorlagen(){
             '</button>').join("")
         : '<p class="empty">Keine Vorlagen. Anzulegen in den Einstellungen.</p>') +
     '</div>' +
-    '<div class="actions"><span class="spacer"></span>' +
+    (alle.length > liste.length || state.vorlagenAlle
+      ? '<label class="check"><input type="checkbox" data-act="vorlagen-alle"' + (state.vorlagenAlle ? " checked" : "") + '> Auch die Vorlagen der anderen</label>'
+      : "") +
+    '<div class="actions">' +
+      '<button class="btn" type="button" data-act="vorlage-neu">+ Vorlage</button>' +
+      '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button></div>' +
   '</div></div>';
 }
@@ -3706,7 +3747,7 @@ function overlayChronikLoesen(){
 }
 function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
-            state.tagDetail || state.vorlagenListe || state.suche || state.aufgabe ||
+            state.tagDetail || state.vorlagenListe || state.vorlage || state.suche || state.aufgabe ||
             state.eintrag || state.listeDialog || state.artikelDialog || state.vorrat || state.gericht || state.zutatDialog ||
             state.planDialog || state.heuteKochen || state.wochenEinkauf || state.wuerfel);
 }
@@ -3731,6 +3772,7 @@ function obersteSchliessen(){
   else if(state.wuerfel)       state.wuerfel = null;
   else if(state.listeDialog)   state.listeDialog = null;
   else if(state.artikelDialog) state.artikelDialog = null;
+  else if(state.vorlage)       state.vorlage = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
   else if(state.suche)         state.suche = null;
@@ -3741,7 +3783,7 @@ function obersteSchliessen(){
 function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
-  state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
+  state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
   state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
   overlayChronikLoesen();
@@ -3753,7 +3795,7 @@ window.addEventListener("popstate", function(){
   if(overlayOffen()){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
-    state.tagDetail = null; state.vorlagenListe = false; state.suche = null; state.aufgabe = null;
+    state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
     state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
     render();
@@ -4081,7 +4123,22 @@ async function aktion(act, el){
       return render();
     }
     case "vorlagen-liste": state.vorlagenListe = true; return render();
-    case "vorlage-neu":    return vorlageAnlegen();
+    case "vorlage-neu":
+      state.vorlage = neueVorlage(null); overlayOeffnen(); render();
+      setTimeout(function(){ const f = $("#vl-titel"); if(f && !state.tablet) f.focus(); }, 30);
+      return;
+    case "vorlage-oeffnen": {
+      const v = state.templates.find(x => x.id === el.dataset.id); if(!v) return;
+      state.vorlage = neueVorlage(v); overlayOeffnen(); return render();
+    }
+    case "vorlage-wer": {
+      vorlageLesen();
+      const ids = state.vorlage.member_ids, i = ids.indexOf(el.dataset.id);
+      // Eine Vorlage gehört zu einer Person — oder zu niemandem.
+      state.vorlage.member_ids = i >= 0 ? [] : [el.dataset.id];
+      return render();
+    }
+    case "vorlagen-alle": state.vorlagenAlle = !state.vorlagenAlle; return render();
     case "vorlage-weg":    return vorlageEntfernen(el.dataset.id);
     case "vorlage-setzen": return vorlageEinsetzen(el.dataset.id);
     case "weg-import": return termineLoeschen(true);
@@ -4119,6 +4176,7 @@ document.addEventListener("submit", async function(e){
     }
     if(act === "wochen-einkauf-los")return await wochenEinkaufAufListe();
     if(act === "liste-speichern")   return await listeSpeichern();
+    if(act === "vorlage-speichern") return await vorlageSpeichern();
     if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
     if(act === "speichern")         return await terminSpeichern();
@@ -4527,17 +4585,30 @@ async function vorlageEinsetzen(id){
   state.busy = false; render();
 }
 
-async function vorlageAnlegen(){
-  const titel = await frage({ titel:"Neue Vorlage", text:"Zum Beispiel L1.", feld:"", platzhalter:"Titel", knopf:"Anlegen" });
-  if(!titel || !String(titel).trim()) return;
-  const r = await sb.from("templates").insert({
-    household_id: state.membership.household_id,
-    titel: titel.trim(), member_ids: [],
-    start_zeit: "08:00", end_zeit: "16:00",
-    sortierung: state.templates.length
-  });
-  if(r.error) return setToast("Fehler: " + r.error.message);
-  await neuLaden(); render();
+async function vorlageSpeichern(){
+  vorlageLesen();
+  const v = state.vorlage; if(!v) return;
+  const titel = v.titel.trim();
+  if(!titel) return;
+  const felder = { titel: titel, member_ids: v.member_ids,
+                   start_zeit: v.start_zeit || "08:00", end_zeit: v.end_zeit || "16:00" };
+  state.busy = true; render();
+  try{
+    const r = v.id
+      ? await sb.from("templates").update(felder).eq("id", v.id)
+      : await sb.from("templates").insert(Object.assign({ household_id: state.membership.household_id,
+          sortierung: state.templates.length }, felder));
+    if(r.error) throw r.error;
+    state.vorlage = null; chronikPruefen();
+    await vorlagenLaden();
+    setToast(v.id ? "Vorlage gespeichert" : "Vorlage „" + titel + "“ angelegt");
+  }catch(err){ setToast(fehlerText(err)); }
+  state.busy = false; render();
+}
+async function vorlagenLaden(){
+  const r = await sb.from("templates").select("*")
+    .eq("household_id", state.membership.household_id).order("sortierung").order("titel");
+  if(!r.error){ state.templates = r.data || []; datenSichern(); }
 }
 
 async function vorlageEntfernen(id){
@@ -4546,7 +4617,8 @@ async function vorlageEntfernen(id){
   if(!(await frage({ titel:"Vorlage „" + v.titel + "“ löschen?", text:"Bereits eingetragene Termine bleiben.", knopf:"Löschen", gefahr:true }))) return;
   const r = await sb.from("templates").delete().eq("id", id);
   if(r.error) return setToast("Fehler: " + r.error.message);
-  await neuLaden(); render();
+  state.vorlage = null; chronikPruefen();
+  await vorlagenLaden(); render();
 }
 
 // Wie viele Termine es insgesamt gibt, weiß nur die Datenbank — geladen
@@ -5151,21 +5223,6 @@ async function einstellungenSpeichern(){
   })).filter(b => b.neu);
   const bereicheNeu = bereichZeilen.map(b => b.neu).filter((b, i, a) => a.indexOf(b) === i);
 
-  const vorlagen = [];
-  document.querySelectorAll(".vorlagerow").forEach(row=>{
-    const v = f => row.querySelector('[data-f="' + f + '"]');
-    const alt = state.templates.find(x => x.id === row.dataset.vid);
-    if(!alt) return;
-    const mid = v("member") ? v("member").value : "";
-    vorlagen.push({
-      id: alt.id,
-      titel: v("titel") ? v("titel").value.trim() || alt.titel : alt.titel,
-      member_ids: mid ? [mid] : [],
-      start_zeit: v("start_zeit") ? v("start_zeit").value : alt.start_zeit,
-      end_zeit:   v("end_zeit")   ? v("end_zeit").value   : alt.end_zeit
-    });
-  });
-
   state.busy = true; render();
   try{
     if(hhName && state.household && hhName !== state.household.name){
@@ -5191,18 +5248,6 @@ async function einstellungenSpeichern(){
             .eq("household_id", state.membership.household_id).eq("bereich", b.alt);
           if(u.error) throw u.error;
         }
-      }
-    }
-    for(const g of vorlagen){
-      const alt = state.templates.find(x => x.id === g.id);
-      if(!alt) continue;
-      if(g.titel !== alt.titel || g.start_zeit !== alt.start_zeit || g.end_zeit !== alt.end_zeit ||
-         (g.member_ids[0] || "") !== (alt.member_ids[0] || "")){
-        const r = await sb.from("templates").update({
-          titel: g.titel, member_ids: g.member_ids,
-          start_zeit: g.start_zeit, end_zeit: g.end_zeit
-        }).eq("id", g.id);
-        if(r.error) throw r.error;
       }
     }
     await neuLaden();
