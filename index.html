@@ -657,7 +657,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-09-30 22:20";
+const FASSUNG = "2026-10-02 20:55";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2184,10 +2184,11 @@ function balkenHtml(spuren){
       ? (eng ? "" : '<span class="t">' + hm(b.o.s) + '</span>') + wer + '<span class="n">' + esc(b.o.ev.titel) + '</span>'
       : b.echtesEnde ? '<span class="t">bis ' + hm(b.o.e) + '</span>'
       : '<span class="n">' + esc(b.o.ev.titel) + '</span>';
-    // Bewusst ein span: Die Tageszelle ist selbst ein Knopf, und ein Knopf
-    // im Knopf zerreißt die Zelle im Browser.
+    // Im Monat führt jeder Tipp zuerst in die Tagesübersicht, nie direkt in
+    // den Termin. Am Anfangstag erledigt das die Zelle selbst; die
+    // Fortsetzung verweist auf den Tag, an dem die Schicht beginnt.
     return '<span class="balken' + (b.anfang ? " anfang" : "") + (b.ende ? " ende" : "") + '"' +
-      ' role="button" tabindex="0" data-act="oeffnen" data-id="' + b.o.ev.id + '" data-occ="' + ymd(b.o.s) + '"' +
+      (b.echterAnfang ? "" : ' data-act="tag-detail" data-d="' + ymd(b.o.s) + '"') +
       ' style="' + farbenOf(b.o.ev) + '" title="' + esc(b.o.ev.titel + " · " + hm(b.o.s) + "–" + hm(b.o.e)) + '">' +
       beschriftung + '</span>';
   }).join("") + '</span>';
