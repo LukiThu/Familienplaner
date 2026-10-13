@@ -327,6 +327,31 @@ button.pill:hover{filter:brightness(1.08)}
 }
 .vorschlaege button:last-child{border-bottom:none}
 .vorschlaege button:hover{background:var(--surface-3)}
+.kacheln{display:flex;gap:8px;flex-wrap:wrap}
+.kachel{
+  flex:1 1 150px;min-width:0;display:flex;flex-direction:column;gap:2px;padding:10px 12px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--karte);
+}
+.kachel .kt{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.kachel .kw{font-size:20px;font-weight:700;letter-spacing:-.02em}
+.kachel .kk{font-size:12.5px;color:var(--muted)}
+.tankung{width:100%;text-align:left;border:1px solid var(--line);cursor:pointer}
+.tankung .wort{flex:1 1 auto;padding:9px 12px}
+.tankung .titel{font-size:15px}
+.tankung .meta{white-space:normal}
+.tankung .teil{color:var(--knapp);font-weight:600}
+.autoblock{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.autoblock h3{margin:0;font-size:17px}
+.autoblock h3 small{font-weight:600;color:var(--muted);font-size:13px}
+.autotabelle{width:100%;border-collapse:collapse;font-size:14px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.autotabelle th,.autotabelle td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)}
+.autotabelle th:first-child,.autotabelle td:first-child{text-align:left;font-weight:600}
+.autotabelle thead th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+.autotabelle tbody tr:last-child td{border-bottom:none;font-weight:600}
+@media (max-width:640px){
+  .autotabelle th,.autotabelle td{padding:6px 7px;font-size:13px}
+}
 .plankopf{display:flex;align-items:center;gap:6px}
 .planwoche{display:flex;flex-direction:column;align-items:center;min-width:120px}
 .planwoche b{font-size:16px}
@@ -657,7 +682,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-02 21:11";
+const FASSUNG = "2026-10-13 10:45";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -728,6 +753,7 @@ const state = {
   lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   filterOffen:false,
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
+  cars:[], fuelings:[], autoAktiv: localStorage.getItem("fp.auto") || null, tankung:null, autoDialog:null,
   zutatFilter:"", zutatDialog:null, artikel:[], artikelDialog:null,
   plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
   // Wandtablet: Tafel. Handy: immer frisch im Monat. Sonst: zuletzt gewählt.
@@ -799,6 +825,16 @@ async function sicherstellenGeladen(){
   }catch(err){ /* beim nächsten Blättern erneut */ }
 }
 
+async function autosLaden(){
+  const hid = state.membership.household_id;
+  const [au, ta] = await Promise.all([
+    sb.from("cars").select("*").eq("household_id", hid).order("sortierung").order("name"),
+    sb.from("fuelings").select("*").eq("household_id", hid).order("km")
+  ]);
+  if(!au.error) state.cars = au.data || [];
+  if(!ta.error) state.fuelings = ta.data || [];
+}
+
 async function kuecheLaden(){
   const hid = state.membership.household_id;
   const [vo, ge, pl] = await Promise.all([
@@ -864,6 +900,7 @@ async function loadAll(){
   await aufgabenLaden();
   await listenLaden();
   await kuecheLaden();
+  await autosLaden();
   subscribe();
 }
 
@@ -881,6 +918,8 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"pantry_items" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"dishes" }, refreshQuiet)
     .on("postgres_changes", { event:"*", schema:"public", table:"meal_plan" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"cars" }, refreshQuiet)
+    .on("postgres_changes", { event:"*", schema:"public", table:"fuelings" }, refreshQuiet)
     .subscribe();
 }
 let refreshTimer = null;
@@ -901,6 +940,7 @@ function refreshQuiet(){
       await aufgabenLaden();
       await listenLaden();
       await kuecheLaden();
+      await autosLaden();
       if(!tpl.error) state.templates = tpl.data || [];
       state.offline = false;
       datenSichern();
@@ -1343,6 +1383,7 @@ function svg(inhalt, groesse){
 const ICON = {
   kalender: (g) => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path>', g),
   aufgaben: (g) => svg('<rect x="3.5" y="3.5" width="17" height="17" rx="3.5"></rect><path d="M8 12.3l2.7 2.7L16.2 9.3"></path>', g),
+  auto:     (g) => svg('<path d="M4 16.5h16"></path><path d="M4 16.5v-3.5l1.8-4.7A2 2 0 0 1 7.7 7h8.6a2 2 0 0 1 1.9 1.3l1.8 4.7v3.5"></path><path d="M4 13h16"></path><circle cx="7.5" cy="17.5" r="1.6"></circle><circle cx="16.5" cy="17.5" r="1.6"></circle>', g),
   kueche:   (g) => svg('<path d="M4.5 10h15v5.5a4.5 4.5 0 0 1-4.5 4.5H9a4.5 4.5 0 0 1-4.5-4.5z"></path><path d="M2.5 11.5h2M19.5 11.5h2M7.5 7h9M12 4.5V7"></path>', g),
   listen:   (g) => svg('<path d="M9 6.5h11M9 12h11M9 17.5h11"></path><circle cx="4.8" cy="6.5" r="1.1"></circle><circle cx="4.8" cy="12" r="1.1"></circle><circle cx="4.8" cy="17.5" r="1.1"></circle>', g),
   plus:     (g) => svg('<path d="M12 5v14M5 12h14"></path>', g),
@@ -1534,6 +1575,7 @@ function datenSichern(){
       tasks: state.tasks, erledigt: state.erledigt,
       lists: state.lists, listItems: state.listItems, artikel: state.artikel,
       pantry: state.pantry, dishes: state.dishes, plan: state.plan,
+      cars: state.cars, fuelings: state.fuelings,
       fenster: state.fenster
         ? { von: state.fenster.von.toISOString(), bis: state.fenster.bis.toISOString() }
         : null
@@ -1560,6 +1602,8 @@ function datenLaden(){
     state.pantry     = d.pantry     || [];
     state.dishes     = d.dishes     || [];
     state.plan       = d.plan       || [];
+    state.cars       = d.cars       || [];
+    state.fuelings   = d.fuelings   || [];
     state.fenster    = d.fenster ? { von:new Date(d.fenster.von), bis:new Date(d.fenster.bis) } : null;
     state.stand      = d.stand || null;
     return true;
@@ -1775,6 +1819,7 @@ function renderImHintergrund(){
   if(state.aufgabe && $("#auf-titel")) aufgabeLesen();
   if(state.eintrag && $("#ein-text")) eintragLesen();
   if(state.vorlage && $("#vl-titel")) vorlageLesen();
+  if(state.tankung && $("#tk-km")) tankungLesen();
   if(state.vorrat && $("#vo-name")) vorratLesen();
   if(state.gericht && $("#ge-name")) gerichtLesen();
   if(state.zutatDialog && $("#zu-ziel")) state.zutatDialog.ziel = $("#zu-ziel").value;
@@ -1829,6 +1874,7 @@ function render(){
           : state.view==="zutaten" ? zutatenAnsicht()
           : state.view==="essen" ? essensplanAnsicht()
           : state.view==="tafel" ? tafelAnsicht()
+          : state.view==="auto" ? autoAnsicht()
           : tagesAnsicht()) + '</div>' +
       (state.view==="monat" ? rail() : "") +
     '</div>' + untenleiste() + '</div>' +
@@ -1837,6 +1883,7 @@ function render(){
     (state.eintrag ? dialogEintrag() : "") +
     (state.listeDialog ? dialogListe() : "") +
     (state.artikelDialog ? dialogArtikel() : "") +
+    (state.tankung ? dialogTankung() : "") +
     (state.vorrat ? dialogVorrat() : "") +
     (state.gericht ? dialogGericht() : "") +
     (state.zutatDialog ? dialogZutat() : "") +
@@ -1850,6 +1897,7 @@ function render(){
     (state.dialog ? dialogTermin() : "") +
     (state.settings ? dialogEinstellungen() : "") +
     (state.vorlage ? dialogVorlage() : "") +
+    (state.autoDialog ? dialogAuto() : "") +
     (state.importer ? dialogImport() : "") +
     (state.frage ? dialogFrage() : "") +
     (state.toast ? '<div class="toast">' + esc(state.toast) + '</div>' : "");
@@ -1970,6 +2018,7 @@ document.addEventListener("webkitfullscreenchange", function(){ renderImHintergr
 // Kalender, Aufgaben, Listen sind die Hauptbereiche; Monat/Woche/Tag
 // gehören nur zum Kalender.
 function bereichVon(view){
+  if(view === "auto") return "auto";
   if(["lager","gerichte","zutaten","essen"].indexOf(view) >= 0) return "kueche";
   if(view === "aufgabenmonat") return "aufgaben";
   return view === "aufgaben" || view === "listen" ? view : "kalender";
@@ -1977,6 +2026,7 @@ function bereichVon(view){
 
 function neuText(){
   const b = bereichVon(state.view);
+  if(b === "auto") return "Tankung";
   if(b === "kueche") return state.view === "gerichte" ? "Gericht" : state.view === "essen" ? "Essen" : "Vorrat";
   return b === "aufgaben" ? "Aufgabe" : b === "listen" ? "Eintrag" : "Termin";
 }
@@ -2020,7 +2070,7 @@ function topbar(){
     '<div class="tb-links">' +
       '<nav class="haupttabs" aria-label="Bereiche">' +
         hauptTab("kalender", "Kalender") + hauptTab("aufgaben", "Aufgaben") + hauptTab("listen", "Listen") +
-        hauptTab("kueche", "Küche") +
+        hauptTab("kueche", "Küche") + (state.tablet ? "" : hauptTab("auto", "Auto")) +
       '</nav>' +
       (bereich === "kalender"
         ? '<div class="viewtabs">' +
@@ -2046,6 +2096,13 @@ function topbar(){
               '<button data-act="liste-neu" aria-pressed="false" title="Neue Liste">+</button>') +
           '</div>'
         : "") +
+      (bereich === "auto" && state.cars.length
+        ? '<div class="viewtabs">' +
+            state.cars.map(c => '<button data-act="auto-waehlen" data-id="' + c.id + '" aria-pressed="' +
+              (aktivesAuto() === c.id) + '">' + esc(c.name) + '</button>').join("") +
+            '<button data-act="auto-waehlen" data-id="' + AUTO_WERTE + '" aria-pressed="' + (aktivesAuto() === AUTO_WERTE) + '">Auswertung</button>' +
+          '</div>'
+        : "") +
       (bereich === "kueche"
         ? '<div class="viewtabs">' +
             '<button data-act="view" data-v="lager" aria-pressed="' + (state.view==="lager") + '">Lager</button>' +
@@ -2062,7 +2119,8 @@ function topbar(){
           '<button class="btn icon ghost" data-act="next" aria-label="weiter">' + ICON.rechts(20) + '</button>' +
           (aufHeute ? "" : '<button class="btn ghost heute-knopf" data-act="heute">Heute</button>') +
         '</div>'
-      : '<h1 class="bereichstitel">' + (bereich === "kueche" ? "Küche" : bereich === "kalender" ? "Heute" : "Listen") + '</h1>') +
+      : '<h1 class="bereichstitel">' + (bereich === "kueche" ? "Küche" : bereich === "auto" ? "Auto"
+          : bereich === "kalender" ? "Heute" : "Listen") + '</h1>') +
     '<div class="spacer"></div>' +
     '<div class="tb-rechts">' +
     (state.offline
@@ -2097,6 +2155,7 @@ function untenleiste(){
       ICON[b](18) + '<span>' + name + '</span></button>';
   return '<nav class="untenleiste" aria-label="Bereiche">' +
     knopf("kalender", "Kalender") + knopf("aufgaben", "Aufgaben") + knopf("listen", "Listen") + knopf("kueche", "Küche") +
+    (state.tablet ? "" : knopf("auto", "Auto")) +
   '</nav>' +
   '<button class="fab" data-act="neu" aria-label="' + neuText() + ' anlegen">' + ICON.plus(26) + '</button>';
 }
@@ -2854,6 +2913,143 @@ function tafelTakt(){
   }
 }
 
+/* =========================================================
+   Auto: Tankungen erfassen und auswerten
+   Der Verbrauch lässt sich nur zwischen zwei vollen Tanks rechnen.
+   Teiltankungen zählen deshalb zur nächsten Volltankung dazu.
+   ========================================================= */
+const AUTO_WERTE = "__werte";
+function aktivesAuto(){
+  if(state.autoAktiv === AUTO_WERTE) return AUTO_WERTE;
+  if(state.autoAktiv && state.cars.some(c => c.id === state.autoAktiv)) return state.autoAktiv;
+  return state.cars.length ? state.cars[0].id : null;
+}
+function autoById(id){ return state.cars.find(c => c.id === id) || null; }
+function tankungenVon(id){
+  return state.fuelings.filter(t => t.car_id === id)
+    .slice().sort((a, b) => (a.km - b.km) || String(a.datum).localeCompare(String(b.datum)));
+}
+function zahl(n, stellen){
+  if(n == null || isNaN(n)) return "–";
+  return Number(n).toLocaleString("de-DE", { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
+}
+function euro(n){ return zahl(n, 2) + " €"; }
+function kommaZahl(wert){
+  const n = parseFloat(String(wert == null ? "" : wert).replace(",", "."));
+  return isNaN(n) ? null : n;
+}
+// Je Tankung: Strecke, verbrauchte Liter und l/100 km — gerechnet wird nur
+// bei Volltankungen, und zwar seit der letzten Volltankung davor.
+function tankungenMitVerbrauch(id){
+  const liste = tankungenVon(id);
+  let letzteVoll = -1, offeneLiter = 0, offenerPreis = 0;
+  return liste.map(function(t, i){
+    offeneLiter += Number(t.liter) || 0;
+    offenerPreis += Number(t.preis) || 0;
+    const e = { t:t, km:0, liter:null, preis:null, verbrauch:null,
+                proLiter: Number(t.liter) ? Number(t.preis) / Number(t.liter) : null };
+    if(t.voll){
+      if(letzteVoll >= 0){
+        e.km = t.km - liste[letzteVoll].km;
+        e.liter = offeneLiter;
+        e.preis = offenerPreis;      // samt Teiltankungen dazwischen
+        if(e.km > 0) e.verbrauch = offeneLiter * 100 / e.km;
+      }
+      letzteVoll = i; offeneLiter = 0; offenerPreis = 0;
+    }
+    return e;
+  });
+}
+// Kennzahlen eines Autos, wahlweise nur für ein Jahr.
+function autoWerte(id, jahr){
+  const alle = tankungenMitVerbrauch(id);
+  const drin = jahr ? alle.filter(e => String(e.t.datum).slice(0,4) === String(jahr)) : alle;
+  const kosten = drin.reduce((n, e) => n + (Number(e.t.preis) || 0), 0);
+  const liter  = drin.reduce((n, e) => n + (Number(e.t.liter) || 0), 0);
+  const mitV   = drin.filter(e => e.verbrauch != null);
+  const km     = mitV.reduce((n, e) => n + e.km, 0);
+  const vLiter = mitV.reduce((n, e) => n + e.liter, 0);
+  const letzte = alle.length ? alle[alle.length - 1] : null;
+  const fuenf  = alle.filter(e => e.verbrauch != null).slice(-5);
+  return {
+    anzahl: drin.length, kosten: kosten, liter: liter, km: km,
+    verbrauch: km > 0 ? vLiter * 100 / km : null,
+    verbrauch5: fuenf.length ? fuenf.reduce((n, e) => n + e.liter, 0) * 100 / fuenf.reduce((n, e) => n + e.km, 0) : null,
+    proLiter: liter > 0 ? kosten / liter : null,
+    pro100: km > 0 ? mitV.reduce((n, e) => n + (e.preis || 0), 0) * 100 / km : null,
+    guenstigste: drin.length ? Math.min.apply(null, drin.map(e => e.proLiter).filter(x => x != null)) : null,
+    teuerste: drin.length ? Math.max.apply(null, drin.map(e => e.proLiter).filter(x => x != null)) : null,
+    letzte: letzte
+  };
+}
+function kachel(titel, wert, klein){
+  return '<div class="kachel"><span class="kt">' + titel + '</span><span class="kw">' + wert + '</span>' +
+    (klein ? '<span class="kk">' + klein + '</span>' : "") + '</div>';
+}
+
+function tankungZeile(e){
+  const t = e.t, d = parseYmd(t.datum);
+  return '<button class="aufgabe eintrag tankung" data-act="tankung-oeffnen" data-id="' + t.id + '">' +
+    '<span class="wort">' +
+      '<span class="titel">' + d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear() +
+        ' · ' + zahl(t.km, 0) + ' km' + (t.voll ? "" : ' · <span class="teil">Teiltankung</span>') + '</span>' +
+      '<span class="meta">' + zahl(t.liter, 2) + ' l · ' + euro(t.preis) + ' · ' + zahl(e.proLiter, 3) + ' €/l' +
+        (e.verbrauch != null ? ' · <b>' + zahl(e.verbrauch, 2) + ' l/100 km</b>' : "") +
+        (t.notiz ? ' · ' + esc(t.notiz) : "") + '</span>' +
+    '</span></button>';
+}
+
+function autoAnsicht(){
+  if(!state.cars.length){
+    return '<div class="agenda" style="max-width:720px"><p class="empty">Noch kein Auto angelegt. In den Einstellungen unter „Autos“ geht das.</p></div>';
+  }
+  if(aktivesAuto() === AUTO_WERTE) return auswertungAnsicht();
+  const id = aktivesAuto(), auto = autoById(id);
+  const liste = tankungenMitVerbrauch(id).slice().reverse();
+  const w = autoWerte(id);
+  const letzte = w.letzte;
+  return '<div class="agenda" style="max-width:720px">' +
+    '<div class="kacheln">' +
+      kachel("Verbrauch", w.verbrauch != null ? zahl(w.verbrauch, 2) + " l" : "–", "im Schnitt, l/100 km") +
+      kachel("Letzte 5", w.verbrauch5 != null ? zahl(w.verbrauch5, 2) + " l" : "–", "l/100 km") +
+      kachel("Spritpreis", w.proLiter != null ? zahl(w.proLiter, 3) + " €" : "–", "je Liter im Schnitt") +
+    '</div>' +
+    (letzte ? '<span class="hint">Zuletzt getankt am ' + tagKurz(parseYmd(letzte.t.datum)) + ' bei ' + zahl(letzte.t.km, 0) + ' km' +
+        (auto && auto.kennzeichen ? ' · ' + esc(auto.kennzeichen) : "") + '</span>' : "") +
+    '<button class="btn primary" data-act="tankung-neu" style="align-self:flex-start">+ Tankung</button>' +
+    (liste.length ? liste.map(tankungZeile).join("")
+      : '<p class="empty">Noch keine Tankung erfasst. Mit + Tankung legst du los — ab der zweiten Volltankung rechnet die App den Verbrauch.</p>') +
+  '</div>';
+}
+
+function auswertungAnsicht(){
+  const jahr = new Date().getFullYear();
+  const block = c => {
+    const g = autoWerte(c.id), j = autoWerte(c.id, jahr), v = autoWerte(c.id, jahr - 1);
+    const zeile = (titel, x) => '<tr><td>' + titel + '</td><td>' + zahl(x.km, 0) + '</td><td>' + zahl(x.liter, 1) +
+      '</td><td>' + euro(x.kosten) + '</td><td>' + (x.verbrauch != null ? zahl(x.verbrauch, 2) : "–") + '</td></tr>';
+    return '<div class="autoblock">' +
+      '<h3>' + esc(c.name) + (c.kennzeichen ? ' <small>' + esc(c.kennzeichen) + '</small>' : "") + '</h3>' +
+      '<div class="kacheln">' +
+        kachel("Verbrauch", g.verbrauch != null ? zahl(g.verbrauch, 2) + " l" : "–", "l/100 km gesamt") +
+        kachel("Kosten", g.pro100 != null ? euro(g.pro100) : "–", "je 100 km") +
+        kachel("Spritpreis", g.proLiter != null ? zahl(g.proLiter, 3) + " €" : "–",
+          g.guenstigste != null ? zahl(g.guenstigste, 3) + " – " + zahl(g.teuerste, 3) + " €/l" : "") +
+        kachel("Tankungen", zahl(g.anzahl, 0), zahl(g.liter, 0) + " l für " + euro(g.kosten)) +
+      '</div>' +
+      '<table class="autotabelle"><thead><tr><th></th><th>km</th><th>Liter</th><th>Kosten</th><th>l/100 km</th></tr></thead><tbody>' +
+        zeile(String(jahr), j) + zeile(String(jahr - 1), v) + zeile("gesamt", g) +
+      '</tbody></table>' +
+      (c.tankgroesse && g.verbrauch ? '<span class="hint">Reichweite mit vollem Tank (' + zahl(c.tankgroesse, 0) + ' l): rund ' +
+        zahl(c.tankgroesse * 100 / g.verbrauch, 0) + ' km</span>' : "") +
+    '</div>';
+  };
+  return '<div class="agenda" style="max-width:720px">' +
+    (state.fuelings.length ? "" : '<p class="empty">Noch nichts zu rechnen — erfasse zuerst ein paar Tankungen.</p>') +
+    state.cars.map(block).join("") +
+  '</div>';
+}
+
 function rail(){
   const heute = new Date(), morgen = addDays(heute,1);
   const blk = (titel, tag) => {
@@ -3044,6 +3240,13 @@ function dialogEinstellungen(){
       '<div id="bereichliste">' + ladenbereiche().map(b => bereichZeile(b, b)).join("") + '</div>' +
       '<button class="btn" type="button" data-act="bereich-neu" style="align-self:flex-start;margin-top:6px">+ Bereich</button>' +
       '<span class="hint">In der Reihenfolge, in der ihr durch den Laden geht.</span></div>' +
+    '<div class="field"><label>Autos</label>' +
+      (state.cars.length
+        ? state.cars.map(c => '<button class="vzeile" type="button" data-act="auto-oeffnen" data-id="' + c.id + '">' +
+            '<span class="n">' + esc(c.name) + (c.kennzeichen ? " · " + esc(c.kennzeichen) : "") + '</span>' +
+            '<span class="t">' + esc(c.kraftstoff || "") + '</span></button>').join("")
+        : '<p class="hint">Noch keines. Im Bereich Auto erfasst ihr dann die Tankungen.</p>') +
+      '<button class="btn" type="button" data-act="auto-neu" style="align-self:flex-start;margin-top:8px">+ Auto</button></div>' +
     '<div class="field"><label>Vorlagen</label>' +
       (vorlagenZeilen || '<p class="hint">Keine. Praktisch für wiederkehrende Dienste — ein Tipp in der Tagesübersicht legt den Termin an.</p>') +
       '<button class="btn" type="button" data-act="vorlage-neu" style="align-self:flex-start;margin-top:8px">+ Vorlage</button></div>' +
@@ -3550,6 +3753,80 @@ function dialogArtikel(){
   '</form></div>';
 }
 
+function neueTankung(t){
+  const id = aktivesAuto() === AUTO_WERTE ? (state.cars[0] ? state.cars[0].id : null) : aktivesAuto();
+  return t ? { id:t.id, car_id:t.car_id, datum:t.datum, km:String(t.km), liter:String(t.liter),
+               preis:String(t.preis), voll:!!t.voll, notiz:t.notiz || "" }
+           : { id:null, car_id:id, datum:ymd(new Date()), km:"", liter:"", preis:"", voll:true, notiz:"" };
+}
+function tankungLesen(){
+  const t = state.tankung; if(!t) return;
+  const g = (sel, f) => { const el = $(sel); if(el) t[f] = el.value; };
+  g("#tk-datum","datum"); g("#tk-km","km"); g("#tk-liter","liter"); g("#tk-preis","preis"); g("#tk-notiz","notiz");
+  const v = $("#tk-voll"); if(v) t.voll = v.checked;
+  const a = $("#tk-auto"); if(a) t.car_id = a.value;
+}
+function dialogTankung(){
+  const t = state.tankung;
+  const liter = kommaZahl(t.liter), preis = kommaZahl(t.preis);
+  const auto = autoById(t.car_id);
+  const vorige = auto ? tankungenVon(auto.id).filter(x => x.id !== t.id).pop() : null;
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="tankung-speichern">' +
+    '<h2>' + (t.id ? "Tankung" : "Neue Tankung") + '</h2>' +
+    (state.cars.length > 1
+      ? '<div class="field"><label for="tk-auto">Auto</label><select id="tk-auto">' +
+          state.cars.map(c => '<option value="' + c.id + '"' + (c.id === t.car_id ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") +
+        '</select></div>'
+      : "") +
+    '<div class="row">' +
+      '<div class="field"><label for="tk-datum">Datum</label><input id="tk-datum" type="date" value="' + esc(t.datum) + '" required></div>' +
+      '<div class="field"><label for="tk-km">Kilometerstand</label>' +
+        '<input id="tk-km" type="number" inputmode="numeric" min="0" step="1" value="' + esc(t.km) + '" required></div>' +
+    '</div>' +
+    '<div class="row">' +
+      '<div class="field"><label for="tk-liter">Liter</label>' +
+        '<input id="tk-liter" type="number" inputmode="decimal" min="0" step="0.01" value="' + esc(t.liter) + '" required></div>' +
+      '<div class="field"><label for="tk-preis">Gesamtpreis in €</label>' +
+        '<input id="tk-preis" type="number" inputmode="decimal" min="0" step="0.01" value="' + esc(t.preis) + '" required></div>' +
+    '</div>' +
+    '<span class="hint">' +
+      (liter && preis ? "Macht " + zahl(preis / liter, 3) + " € je Liter." : "Beides vom Beleg — den Literpreis rechnet die App.") +
+      (vorige ? " Letzter Stand: " + zahl(vorige.km, 0) + " km." : "") + '</span>' +
+    '<label class="check"><input id="tk-voll" type="checkbox"' + (t.voll ? " checked" : "") + '> Vollgetankt</label>' +
+    '<span class="hint">Nur zwischen zwei vollen Tanks lässt sich der Verbrauch rechnen. Eine Teiltankung zählt zur nächsten vollen dazu.</span>' +
+    '<div class="field"><label for="tk-notiz">Notiz</label><input id="tk-notiz" type="text" value="' + esc(t.notiz) + '" placeholder="freiwillig"></div>' +
+    '<div class="actions">' +
+      (t.id ? '<button class="btn danger" type="button" data-act="tankung-loeschen">Löschen</button>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
+function dialogAuto(){
+  const a = state.autoDialog;
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="auto-speichern">' +
+    '<h2>' + (a.id ? "Auto" : "Neues Auto") + '</h2>' +
+    '<div class="field"><label for="au-name">Name</label><input id="au-name" type="text" value="' + esc(a.name) + '" required></div>' +
+    '<div class="row">' +
+      '<div class="field"><label for="au-kz">Kennzeichen</label><input id="au-kz" type="text" value="' + esc(a.kennzeichen) + '" placeholder="freiwillig"></div>' +
+      '<div class="field"><label for="au-sprit">Kraftstoff</label><select id="au-sprit">' +
+        ["Diesel","Benzin","Gas","Strom"].map(k => '<option value="' + k + '"' + (a.kraftstoff === k ? " selected" : "") + '>' + k + '</option>').join("") +
+      '</select></div>' +
+    '</div>' +
+    '<div class="field"><label for="au-tank">Tankgröße in Liter</label>' +
+      '<input id="au-tank" type="number" inputmode="numeric" min="0" step="1" value="' + esc(a.tankgroesse) + '" placeholder="freiwillig">' +
+      '<span class="hint">Nur für die grobe Reichweite in der Auswertung.</span></div>' +
+    '<div class="actions">' +
+      (a.id ? '<button class="btn danger" type="button" data-act="auto-loeschen">Löschen</button>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
 function dialogListe(){
   const l = state.listeDialog;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="liste-speichern">' +
@@ -3760,6 +4037,7 @@ function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
             state.tagDetail || state.vorlagenListe || state.vorlage || state.suche || state.aufgabe ||
             state.eintrag || state.listeDialog || state.artikelDialog || state.vorrat || state.gericht || state.zutatDialog ||
+            state.tankung || state.autoDialog ||
             state.planDialog || state.heuteKochen || state.wochenEinkauf || state.wuerfel);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
@@ -3783,6 +4061,8 @@ function obersteSchliessen(){
   else if(state.wuerfel)       state.wuerfel = null;
   else if(state.listeDialog)   state.listeDialog = null;
   else if(state.artikelDialog) state.artikelDialog = null;
+  else if(state.tankung)       state.tankung = null;
+  else if(state.autoDialog)    state.autoDialog = null;
   else if(state.vorlage)       state.vorlage = null;
   else if(state.vorlagenListe) state.vorlagenListe = false;
   else if(state.settings)      state.settings = false;
@@ -3795,7 +4075,8 @@ function overlaySchliessen(){
   frageVerwerfen();
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
-  state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+  state.eintrag = null; state.listeDialog = null; state.artikelDialog = null;
+  state.tankung = null; state.autoDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
   overlayChronikLoesen();
   render();
@@ -3807,7 +4088,8 @@ window.addEventListener("popstate", function(){
     frageVerwerfen();
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
-    state.eintrag = null; state.listeDialog = null; state.artikelDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+    state.eintrag = null; state.listeDialog = null; state.artikelDialog = null;
+  state.tankung = null; state.autoDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
     render();
   }
@@ -3876,6 +4158,7 @@ async function aktion(act, el){
     case "neu": {
       const b = bereichVon(state.view);
       if(b === "aufgaben"){ state.aufgabe = neueAufgabe(null); overlayOeffnen(); return render(); }
+      if(b === "auto"){ state.tankung = neueTankung(null); overlayOeffnen(); return render(); }
       if(b === "kueche"){
         if(state.view === "gerichte") state.gericht = neuesGericht(null);
         else if(state.view === "essen") state.planDialog = { tag: ymd(planMontag()), mahlzeit:"woche", suche:"" };
@@ -3897,6 +4180,8 @@ async function aktion(act, el){
         if(["monat","woche","tag","tafel"].indexOf(state.view) < 0) state.view = "monat";
       }else if(b === "aufgaben"){
         state.view = localStorage.getItem("fp.aufgabenView") === "aufgabenmonat" ? "aufgabenmonat" : "aufgaben";
+      }else if(b === "auto"){
+        state.view = "auto";
       }else if(b === "kueche"){
         const kv = localStorage.getItem("fp.kuecheView");
         state.view = ["gerichte","zutaten","essen"].indexOf(kv) >= 0 ? kv : "lager";
@@ -3984,6 +4269,25 @@ async function aktion(act, el){
       overlayOeffnen(); return render();
     }
     case "artikel-loeschen": return artikelLoeschen();
+    case "auto-waehlen":
+      state.autoAktiv = el.dataset.id;
+      localStorage.setItem("fp.auto", state.autoAktiv);
+      return render();
+    case "tankung-neu": state.tankung = neueTankung(null); overlayOeffnen(); return render();
+    case "tankung-oeffnen": {
+      const t = state.fuelings.find(x => x.id === el.dataset.id); if(!t) return;
+      state.tankung = neueTankung(t); overlayOeffnen(); return render();
+    }
+    case "tankung-loeschen": return tankungLoeschen();
+    case "auto-neu": state.autoDialog = { id:null, name:"", kennzeichen:"", kraftstoff:"Diesel", tankgroesse:"" };
+      overlayOeffnen(); return render();
+    case "auto-oeffnen": {
+      const a = autoById(el.dataset.id); if(!a) return;
+      state.autoDialog = { id:a.id, name:a.name, kennzeichen:a.kennzeichen || "", kraftstoff:a.kraftstoff || "Diesel",
+                           tankgroesse: a.tankgroesse == null ? "" : String(a.tankgroesse) };
+      overlayOeffnen(); return render();
+    }
+    case "auto-loeschen": return autoLoeschen();
     case "liste-neu": return listeAnlegen();
     case "liste-bearbeiten": {
       const l = aktiveListe(); if(!l) return;
@@ -4188,6 +4492,8 @@ document.addEventListener("submit", async function(e){
     if(act === "wochen-einkauf-los")return await wochenEinkaufAufListe();
     if(act === "liste-speichern")   return await listeSpeichern();
     if(act === "vorlage-speichern") return await vorlageSpeichern();
+    if(act === "tankung-speichern") return await tankungSpeichern();
+    if(act === "auto-speichern")    return await autoSpeichern();
     if(act === "suchen")            return await suchen();
     if(act === "login")             return await anmelden();
     if(act === "speichern")         return await terminSpeichern();
@@ -4298,6 +4604,10 @@ document.addEventListener("input", function(e){
     const knopf = $("#plan-notiz-knopf");
     if(knopf) knopf.disabled = !e.target.value.trim();
     return spaeter(function(){ if(state.planDialog) teilNeu("plan-treffer", planTreffer()); });
+  }
+  if(e.target && state.tankung && (e.target.id === "tk-liter" || e.target.id === "tk-preis")){
+    tankungLesen();
+    return spaeter(renderImHintergrund);
   }
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
@@ -5086,6 +5396,77 @@ async function wochenEinkaufAufListe(){
   render();
 }
 
+async function tankungSpeichern(){
+  tankungLesen();
+  const t = state.tankung; if(!t) return;
+  const km = kommaZahl(t.km), liter = kommaZahl(t.liter), preis = kommaZahl(t.preis);
+  if(!t.car_id || !t.datum || km == null || liter == null || preis == null) return;
+  const zeile = { car_id:t.car_id, datum:t.datum, km:Math.round(km), liter:liter, preis:preis,
+                  voll:!!t.voll, notiz:(t.notiz || "").trim() };
+  state.busy = true; render();
+  try{
+    const r = t.id
+      ? await sb.from("fuelings").update(zeile).eq("id", t.id)
+      : await sb.from("fuelings").insert(Object.assign({ household_id: state.membership.household_id }, zeile));
+    if(r.error) throw r.error;
+    state.tankung = null; chronikPruefen();
+    // Nach dem Eintragen das Auto zeigen, zu dem die Tankung gehört.
+    if(aktivesAuto() !== zeile.car_id && state.autoAktiv !== AUTO_WERTE){
+      state.autoAktiv = zeile.car_id; localStorage.setItem("fp.auto", state.autoAktiv);
+    }
+    await autosLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  state.busy = false; render();
+}
+async function tankungLoeschen(){
+  const t = state.tankung; if(!t || !t.id) return;
+  const ja = await frage({ titel:"Tankung löschen?", text:"Der Verbrauch der Nachbartankungen rechnet sich danach neu.",
+                           knopf:"Löschen", gefahr:true });
+  if(!ja) return;
+  try{
+    const r = await sb.from("fuelings").delete().eq("id", t.id);
+    if(r.error) throw r.error;
+    state.tankung = null; chronikPruefen();
+    await autosLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+async function autoSpeichern(){
+  const a = state.autoDialog; if(!a) return;
+  const name = ($("#au-name") ? $("#au-name").value : a.name).trim();
+  if(!name) return;
+  const tank = kommaZahl($("#au-tank") ? $("#au-tank").value : a.tankgroesse);
+  const zeile = { name:name,
+                  kennzeichen: ($("#au-kz") ? $("#au-kz").value : a.kennzeichen).trim(),
+                  kraftstoff: $("#au-sprit") ? $("#au-sprit").value : a.kraftstoff,
+                  tankgroesse: tank ? Math.round(tank) : null };
+  try{
+    const r = a.id
+      ? await sb.from("cars").update(zeile).eq("id", a.id)
+      : await sb.from("cars").insert(Object.assign({ household_id: state.membership.household_id,
+          sortierung: state.cars.length }, zeile));
+    if(r.error) throw r.error;
+    state.autoDialog = null; chronikPruefen();
+    await autosLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+async function autoLoeschen(){
+  const a = state.autoDialog; if(!a || !a.id) return;
+  const n = state.fuelings.filter(t => t.car_id === a.id).length;
+  const ja = await frage({ titel:"Auto löschen?",
+    text:"„" + a.name + "“ verschwindet" + (n ? " samt " + n + " Tankungen." : "."), knopf:"Löschen", gefahr:true });
+  if(!ja) return;
+  try{
+    const r = await sb.from("cars").delete().eq("id", a.id);
+    if(r.error) throw r.error;
+    state.autoDialog = null; chronikPruefen();
+    if(state.autoAktiv === a.id) state.autoAktiv = null;
+    await autosLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
+}
+
 async function gerichtSpeichern(){
   gerichtLesen();
   const g = state.gericht, name = g.name.trim();
@@ -5334,6 +5715,7 @@ async function neuLaden(){
   await aufgabenLaden();
   await listenLaden();
   await kuecheLaden();
+  await autosLaden();
   datenSichern();
 }
 
