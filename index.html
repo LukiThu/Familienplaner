@@ -682,7 +682,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 10:45";
+const FASSUNG = "2026-10-13 11:13";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1843,8 +1843,13 @@ function render(){
   const app = $("#app");
   // Wo der Cursor stand, danach wieder hinsetzen.
   const aktiv = document.activeElement;
-  const fokus = (aktiv && aktiv.id && app.contains(aktiv))
-    ? { id: aktiv.id, a: aktiv.selectionStart, b: aktiv.selectionEnd } : null;
+  // Zahlen-, Datums- und Zeitfelder melden keine Cursorposition — dort darf
+  // nichts gesetzt werden, sonst springt der Cursor an den Anfang.
+  let fokus = null;
+  if(aktiv && aktiv.id && app.contains(aktiv)){
+    fokus = { id: aktiv.id, a: null, b: null };
+    try{ fokus.a = aktiv.selectionStart; fokus.b = aktiv.selectionEnd; }catch(_){}
+  }
   // Und wie weit gescrollt war: nach dem Bearbeiten eines Eintrags soll die
   // Liste dort stehen bleiben, wo man war — aber nicht beim Ansichtswechsel.
   const alterInhalt = $(".content");
@@ -3766,11 +3771,17 @@ function tankungLesen(){
   const v = $("#tk-voll"); if(v) t.voll = v.checked;
   const a = $("#tk-auto"); if(a) t.car_id = a.value;
 }
-function dialogTankung(){
-  const t = state.tankung;
+function tankungHinweis(){
+  const t = state.tankung; if(!t) return "";
   const liter = kommaZahl(t.liter), preis = kommaZahl(t.preis);
   const auto = autoById(t.car_id);
   const vorige = auto ? tankungenVon(auto.id).filter(x => x.id !== t.id).pop() : null;
+  return (liter && preis ? "Macht " + zahl(preis / liter, 3) + " € je Liter."
+                         : "Beides vom Beleg — den Literpreis rechnet die App.") +
+         (vorige ? " Letzter Stand: " + zahl(vorige.km, 0) + " km." : "");
+}
+function dialogTankung(){
+  const t = state.tankung;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="tankung-speichern">' +
     '<h2>' + (t.id ? "Tankung" : "Neue Tankung") + '</h2>' +
     (state.cars.length > 1
@@ -3789,9 +3800,7 @@ function dialogTankung(){
       '<div class="field"><label for="tk-preis">Gesamtpreis in €</label>' +
         '<input id="tk-preis" type="number" inputmode="decimal" min="0" step="0.01" value="' + esc(t.preis) + '" required></div>' +
     '</div>' +
-    '<span class="hint">' +
-      (liter && preis ? "Macht " + zahl(preis / liter, 3) + " € je Liter." : "Beides vom Beleg — den Literpreis rechnet die App.") +
-      (vorige ? " Letzter Stand: " + zahl(vorige.km, 0) + " km." : "") + '</span>' +
+    '<span class="hint" id="tk-hinweis">' + tankungHinweis() + '</span>' +
     '<label class="check"><input id="tk-voll" type="checkbox"' + (t.voll ? " checked" : "") + '> Vollgetankt</label>' +
     '<span class="hint">Nur zwischen zwei vollen Tanks lässt sich der Verbrauch rechnen. Eine Teiltankung zählt zur nächsten vollen dazu.</span>' +
     '<div class="field"><label for="tk-notiz">Notiz</label><input id="tk-notiz" type="text" value="' + esc(t.notiz) + '" placeholder="freiwillig"></div>' +
@@ -4605,9 +4614,14 @@ document.addEventListener("input", function(e){
     if(knopf) knopf.disabled = !e.target.value.trim();
     return spaeter(function(){ if(state.planDialog) teilNeu("plan-treffer", planTreffer()); });
   }
+  // Zahlenfelder melden dem Browser keine Cursorposition. Zeichnet die App
+  // beim Tippen neu, steht der Cursor danach wieder vorne — deshalb hier
+  // nur den Hinweis unter den Feldern austauschen.
   if(e.target && state.tankung && (e.target.id === "tk-liter" || e.target.id === "tk-preis")){
     tankungLesen();
-    return spaeter(renderImHintergrund);
+    const h = document.getElementById("tk-hinweis");
+    if(h) h.textContent = tankungHinweis();
+    return;
   }
   if(e.target && e.target.id === "eintrag-text"){
     state.entwurf = e.target.value;
