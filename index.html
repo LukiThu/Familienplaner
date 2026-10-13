@@ -682,7 +682,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 11:13";
+const FASSUNG = "2026-10-13 11:16";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -3043,7 +3043,7 @@ function auswertungAnsicht(){
         kachel("Tankungen", zahl(g.anzahl, 0), zahl(g.liter, 0) + " l für " + euro(g.kosten)) +
       '</div>' +
       '<table class="autotabelle"><thead><tr><th></th><th>km</th><th>Liter</th><th>Kosten</th><th>l/100 km</th></tr></thead><tbody>' +
-        zeile(String(jahr), j) + zeile(String(jahr - 1), v) + zeile("gesamt", g) +
+        zeile(String(jahr), j) + (v.anzahl ? zeile(String(jahr - 1), v) : "") + zeile("gesamt", g) +
       '</tbody></table>' +
       (c.tankgroesse && g.verbrauch ? '<span class="hint">Reichweite mit vollem Tank (' + zahl(c.tankgroesse, 0) + ' l): rund ' +
         zahl(c.tankgroesse * 100 / g.verbrauch, 0) + ' km</span>' : "") +
