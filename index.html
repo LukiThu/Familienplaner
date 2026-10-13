@@ -682,7 +682,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 11:23";
+const FASSUNG = "2026-10-13 17:31";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -754,6 +754,7 @@ const state = {
   filterOffen:false,
   pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
   cars:[], fuelings:[], autoAktiv: localStorage.getItem("fp.auto") || null, tankung:null, autoDialog:null,
+  planDatum:null,
   zutatFilter:"", zutatDialog:null, artikel:[], artikelDialog:null,
   plan:[], planWoche:null, planDialog:null, wochenEinkauf:null, heuteKochen:false, wuerfel:null,
   // Wandtablet: Tafel. Handy: immer frisch im Monat. Sonst: zuletzt gewählt.
@@ -1889,6 +1890,7 @@ function render(){
     (state.listeDialog ? dialogListe() : "") +
     (state.artikelDialog ? dialogArtikel() : "") +
     (state.tankung ? dialogTankung() : "") +
+    (state.planDatum ? dialogPlanDatum() : "") +
     (state.vorrat ? dialogVorrat() : "") +
     (state.gericht ? dialogGericht() : "") +
     (state.zutatDialog ? dialogZutat() : "") +
@@ -2790,6 +2792,8 @@ function planEintragZeile(e){
     (g ? '</button>' : '</span>') +
     (heuteSchon ? "" : '<button class="btn icon ghost gekocht" data-act="plan-gekocht" data-id="' + e.id +
       '" aria-label="heute gekocht" title="heute gekocht">&#10003;</button>') +
+    '<button class="btn icon ghost" data-act="plan-datum" data-id="' + e.id + '" aria-label="auf ein Datum legen" title="auf ein Datum legen">' +
+      ICON.kalender(17) + '</button>' +
     '<button class="btn icon ghost" data-act="plan-weg" data-id="' + e.id + '" aria-label="aus dem Plan nehmen">&#10005;</button>' +
   '</div>';
 }
@@ -3630,17 +3634,17 @@ function auswahlKnopf(g, act, tag){
 function planTreffer(){
   const liste = gerichteZurAuswahl(state.planDialog.suche);
   return liste.length ? liste.map(g => auswahlKnopf(g, "plan-gericht")).join("")
-    : '<p class="hint">' + (state.dishes.length ? "Kein Gericht gefunden." : "Noch keine Gerichte angelegt.") + '</p>';
+    : '<p class="hint">' + (state.dishes.length ? "Kein Gericht gefunden — unten anlegen." : "Noch keine Gerichte angelegt — unten anlegen.") + '</p>';
 }
 function dialogPlan(){
   const d = state.planDialog, tag = parseYmd(d.tag);
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-notiz">' +
     '<h2>' + (d.mahlzeit === "woche" ? "Essen für diese Woche" : "Essen am " + tagKurz(tag)) + '</h2>' +
-    '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder Notiz („Reste“)" autocomplete="off">' +
+    '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder neu anlegen" autocomplete="off">' +
     '<div class="auswahlliste" id="plan-treffer">' + planTreffer() + '</div>' +
     '<div class="actions">' +
-      '<button class="btn" type="button" data-act="plan-als-notiz" id="plan-notiz-knopf"' + (d.suche.trim() ? "" : " disabled") + '>' +
-        (d.suche.trim() ? 'Als Notiz eintragen' : 'Als Notiz eintragen') + '</button>' +
+      '<button class="btn" type="button" data-act="plan-als-gericht" id="plan-notiz-knopf"' + (d.suche.trim() ? "" : " disabled") + '>' +
+        'Als neues Gericht anlegen</button>' +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
     '</div>' +
@@ -3833,6 +3837,32 @@ function dialogAuto(){
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
       '<button class="btn primary" type="submit">Speichern</button>' +
+    '</div>' +
+  '</form></div>';
+}
+
+function dialogPlanDatum(){
+  const p = state.planDatum;
+  const e = state.plan.find(x => x.id === p.id);
+  if(!e) return "";
+  const mo = planMontag(), heute = startOfDay(new Date());
+  const tage = [0,1,2,3,4,5,6].map(i => addDays(mo, i));
+  const chip = (txt, wert, aktiv) =>
+    '<button class="fchip" type="button" data-act="plan-datum-setzen" data-d="' + wert + '" aria-pressed="' + !!aktiv + '">' + txt + '</button>';
+  return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-datum-speichern">' +
+    '<h2>Wann?</h2>' +
+    '<p class="hint" style="margin:0">' + esc(planName(e)) + '</p>' +
+    '<div class="whopick">' +
+      chip("Diese Woche", "woche", istVorrat(e)) +
+      tage.map(d => chip(WDS[(d.getDay()+6)%7] + " " + d.getDate() + ".", ymd(d),
+        !istVorrat(e) && e.tag === ymd(d))).join("") +
+    '</div>' +
+    '<div class="field"><label for="pd-datum">Anderes Datum</label>' +
+      '<input id="pd-datum" type="date" value="' + esc(istVorrat(e) ? ymd(heute) : e.tag) + '"></div>' +
+    '<div class="actions">' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Übernehmen</button>' +
     '</div>' +
   '</form></div>';
 }
@@ -4047,7 +4077,7 @@ function overlayOffen(){
   return !!(state.frage || state.dialog || state.settings || state.importer ||
             state.tagDetail || state.vorlagenListe || state.vorlage || state.suche || state.aufgabe ||
             state.eintrag || state.listeDialog || state.artikelDialog || state.vorrat || state.gericht || state.zutatDialog ||
-            state.tankung || state.autoDialog ||
+            state.tankung || state.autoDialog || state.planDatum ||
             state.planDialog || state.heuteKochen || state.wochenEinkauf || state.wuerfel);
 }
 // Der Chronik-Eintrag wird erst frei, wenn gar nichts mehr offen ist.
@@ -4071,6 +4101,7 @@ function obersteSchliessen(){
   else if(state.wuerfel)       state.wuerfel = null;
   else if(state.listeDialog)   state.listeDialog = null;
   else if(state.artikelDialog) state.artikelDialog = null;
+  else if(state.planDatum)     state.planDatum = null;
   else if(state.tankung)       state.tankung = null;
   else if(state.autoDialog)    state.autoDialog = null;
   else if(state.vorlage)       state.vorlage = null;
@@ -4086,7 +4117,7 @@ function overlaySchliessen(){
   state.dialog = null; state.settings = false; state.importer = null;
   state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
   state.eintrag = null; state.listeDialog = null; state.artikelDialog = null;
-  state.tankung = null; state.autoDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+  state.tankung = null; state.autoDialog = null; state.planDatum = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
   overlayChronikLoesen();
   render();
@@ -4099,7 +4130,7 @@ window.addEventListener("popstate", function(){
     state.dialog = null; state.settings = false; state.importer = null;
     state.tagDetail = null; state.vorlagenListe = false; state.vorlage = null; state.suche = null; state.aufgabe = null;
     state.eintrag = null; state.listeDialog = null; state.artikelDialog = null;
-  state.tankung = null; state.autoDialog = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
+  state.tankung = null; state.autoDialog = null; state.planDatum = null; state.vorrat = null; state.gericht = null; state.zutatDialog = null;
   state.planDialog = null; state.heuteKochen = false; state.wochenEinkauf = null; state.wuerfel = null;
     render();
   }
@@ -4343,9 +4374,15 @@ async function aktion(act, el){
     case "plan-gericht": return planEintragen(state.planDialog.tag, el.dataset.id, "", state.planDialog.mahlzeit);
     case "plan-weg": return planEntfernen(el.dataset.id);
     case "plan-gekocht": return planGekocht(el.dataset.id);
-    case "plan-als-notiz": {
+    case "plan-datum": {
+      if(!state.plan.some(x => x.id === el.dataset.id)) return;
+      state.planDatum = { id: el.dataset.id };
+      overlayOeffnen(); return render();
+    }
+    case "plan-datum-setzen": return planVerschieben(state.planDatum.id, el.dataset.d);
+    case "plan-als-gericht": {
       const t = (($("#plan-suche") || {}).value || "").trim();
-      return t ? planEintragen(state.planDialog.tag, null, t, state.planDialog.mahlzeit) : undefined;
+      return t ? gerichtAnlegenUndPlanen(t) : undefined;
     }
     case "heute-kochen": state.heuteKochen = true; overlayOeffnen(); return render();
     case "heute-waehlen": state.heuteKochen = false; chronikPruefen(); return planEintragen(ymd(new Date()), el.dataset.id, "", "abend");
@@ -4494,10 +4531,15 @@ document.addEventListener("submit", async function(e){
     if(act === "gericht-speichern") return await gerichtSpeichern();
     if(act === "zutat-speichern")   return await zutatZusammenfuehren();
     if(act === "plan-notiz"){
-      // Enter: erstes passendes Gericht, sonst als Notiz.
+      // Enter: erstes passendes Gericht, sonst als neues Gericht anlegen.
       const t = (($("#plan-suche") || {}).value || "").trim(); if(!t) return;
       const g = gerichteZurAuswahl(t)[0];
-      return await planEintragen(state.planDialog.tag, g ? g.id : null, g ? "" : t, state.planDialog.mahlzeit);
+      if(g) return await planEintragen(state.planDialog.tag, g.id, "", state.planDialog.mahlzeit);
+      return await gerichtAnlegenUndPlanen(t);
+    }
+    if(act === "plan-datum-speichern"){
+      const feld = $("#pd-datum");
+      return await planVerschieben(state.planDatum.id, feld ? feld.value : null);
     }
     if(act === "wochen-einkauf-los")return await wochenEinkaufAufListe();
     if(act === "liste-speichern")   return await listeSpeichern();
@@ -5378,6 +5420,43 @@ async function planGekocht(id){
     if(r.error) throw r.error;
     datenSichern();
     setToast("„" + planName(e) + "“ als heute gekocht vermerkt");
+  }catch(err){ await kuecheLaden(); setToast(fehlerText(err)); }
+  render();
+}
+
+// Ein Gericht, das es noch nicht gibt: nur der Name, alles andere später.
+async function gerichtAnlegenUndPlanen(name){
+  const d = state.planDialog; if(!d) return;
+  state.busy = true; render();
+  try{
+    const r = await sb.from("dishes").insert({
+      household_id: state.membership.household_id, name: name.trim(),
+      zutaten: [], dauer_min: null, vegetarisch: false, kinder: false, idee: false, notiz: ""
+    }).select("*").single();
+    if(r.error) throw r.error;
+    state.dishes = state.dishes.concat([r.data]);
+    state.busy = false;
+    await planEintragen(d.tag, r.data.id, "", d.mahlzeit);
+    setToast("„" + name.trim() + "“ angelegt und eingeplant");
+    return;
+  }catch(err){ setToast(fehlerText(err)); }
+  state.busy = false; render();
+}
+
+// Einen Eintrag auf einen Tag legen — oder zurück in den Wochenvorrat.
+async function planVerschieben(id, wert){
+  const e = state.plan.find(x => x.id === id); if(!e || !wert) return;
+  const neu = wert === "woche"
+    ? { tag: ymd(mondayOf(e.tag ? parseYmd(e.tag) : new Date())), mahlzeit: "woche" }
+    : { tag: wert, mahlzeit: "abend" };
+  state.plan = state.plan.map(x => x.id === id ? Object.assign({}, x, neu) : x);
+  state.planDatum = null; chronikPruefen();
+  render();
+  try{
+    const r = await sb.from("meal_plan").update(neu).eq("id", id);
+    if(r.error) throw r.error;
+    datenSichern();
+    setToast(wert === "woche" ? "In den Wochenvorrat gelegt" : "Auf " + tagKurz(parseYmd(wert)) + " gelegt");
   }catch(err){ await kuecheLaden(); setToast(fehlerText(err)); }
   render();
 }
