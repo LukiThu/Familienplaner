@@ -682,7 +682,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 11:16";
+const FASSUNG = "2026-10-13 11:23";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -3784,6 +3784,7 @@ function dialogTankung(){
   const t = state.tankung;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="tankung-speichern">' +
     '<h2>' + (t.id ? "Tankung" : "Neue Tankung") + '</h2>' +
+    (t.error ? '<div class="err">' + esc(t.error) + '</div>' : "") +
     (state.cars.length > 1
       ? '<div class="field"><label for="tk-auto">Auto</label><select id="tk-auto">' +
           state.cars.map(c => '<option value="' + c.id + '"' + (c.id === t.car_id ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") +
@@ -5410,11 +5411,32 @@ async function wochenEinkaufAufListe(){
   render();
 }
 
+// Der Kilometerstand muss zu den Nachbartankungen passen: nach einer
+// älteren Tankung höher, vor einer jüngeren niedriger. So lässt sich auch
+// ein vergessener Beleg nachtragen, ein Zahlendreher aber nicht.
+function kmPasstNicht(t, km){
+  const andere = tankungenVon(t.car_id).filter(x => x.id !== t.id);
+  const vorher = andere.filter(x => x.datum < t.datum).sort((a, b) => a.km - b.km).pop();
+  const nachher = andere.filter(x => x.datum > t.datum).sort((a, b) => a.km - b.km)[0];
+  const gleich = andere.filter(x => x.datum === t.datum);
+  if(vorher && km < vorher.km)
+    return "Am " + tagKurz(parseYmd(vorher.datum)) + " standen schon " + zahl(vorher.km, 0) +
+           " km. Der Zähler kann nicht zurücklaufen.";
+  if(nachher && km > nachher.km)
+    return "Am " + tagKurz(parseYmd(nachher.datum)) + " waren es erst " + zahl(nachher.km, 0) +
+           " km. So viel kann hier noch nicht gestanden sein.";
+  if(gleich.some(x => x.km === km))
+    return "Für diesen Tag ist bereits eine Tankung mit " + zahl(km, 0) + " km erfasst.";
+  return null;
+}
+
 async function tankungSpeichern(){
   tankungLesen();
   const t = state.tankung; if(!t) return;
   const km = kommaZahl(t.km), liter = kommaZahl(t.liter), preis = kommaZahl(t.preis);
   if(!t.car_id || !t.datum || km == null || liter == null || preis == null) return;
+  t.error = kmPasstNicht(t, Math.round(km));
+  if(t.error) return render();
   const zeile = { car_id:t.car_id, datum:t.datum, km:Math.round(km), liter:liter, preis:preis,
                   voll:!!t.voll, notiz:(t.notiz || "").trim() };
   state.busy = true; render();
