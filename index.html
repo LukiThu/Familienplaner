@@ -540,6 +540,8 @@ button.pill:hover{filter:brightness(1.08)}
   .modal .actions{flex-wrap:wrap;gap:8px}
   .modal .actions .spacer{display:none}
   .modal .actions .btn{flex:1 1 calc(50% - 4px);min-width:0;justify-content:center}
+  /* Knöpfe mit langer Beschriftung bekommen die ganze Zeile. */
+  .modal .actions .btn.breit{flex:1 1 100%}
 }
 .whopick{display:flex;gap:7px;flex-wrap:wrap}
 .whopick button{
@@ -682,7 +684,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 17:31";
+const FASSUNG = "2026-10-13 17:43";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -3643,7 +3645,7 @@ function dialogPlan(){
     '<input id="plan-suche" type="search" value="' + esc(d.suche) + '" placeholder="Gericht suchen oder neu anlegen" autocomplete="off">' +
     '<div class="auswahlliste" id="plan-treffer">' + planTreffer() + '</div>' +
     '<div class="actions">' +
-      '<button class="btn" type="button" data-act="plan-als-gericht" id="plan-notiz-knopf"' + (d.suche.trim() ? "" : " disabled") + '>' +
+      '<button class="btn breit" type="button" data-act="plan-als-gericht" id="plan-notiz-knopf"' + (d.suche.trim() ? "" : " disabled") + '>' +
         'Als neues Gericht anlegen</button>' +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
