@@ -343,6 +343,16 @@ button.pill:hover{filter:brightness(1.08)}
 .autoblock{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
 .autoblock h3{margin:0;font-size:17px}
 .autoblock h3 small{font-weight:600;color:var(--muted);font-size:13px}
+.monatsreihe{display:flex;flex-direction:column;gap:3px;margin-top:6px}
+.monatsreihe h4{margin:0 0 2px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.monatsreihe h4 small{font-weight:600;text-transform:none;letter-spacing:0}
+.monatszeile{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.monatszeile .mm{flex:0 0 62px;color:var(--muted);font-variant-numeric:tabular-nums}
+.monatszeile .mb{flex:1 1 auto;min-width:0;height:12px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.monatszeile .mb span{display:block;height:100%;background:var(--accent);border-radius:3px}
+.monatszeile .mz{flex:0 0 58px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.monatszeile.teil .mb span{opacity:.45}
+.monatszeile.teil .mz{color:var(--muted);font-weight:500}
 .autotabelle{width:100%;border-collapse:collapse;font-size:14px;background:var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .autotabelle th,.autotabelle td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)}
@@ -684,7 +694,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-13 17:43";
+const FASSUNG = "2026-10-17 20:37";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2993,6 +3003,56 @@ function autoWerte(id, jahr){
     letzte: letzte
   };
 }
+// Kilometer je Monat, geschätzt: Zwischen zwei Tankungen kennen wir die
+// Strecke und die Tage dazwischen. Die Kilometer werden gleichmäßig auf
+// die Tage verteilt und monatsweise zusammengezählt. Vor der ersten und
+// nach der letzten Tankung wissen wir nichts — diese Zeit bleibt außen vor.
+function kmProMonat(id, monate){
+  const liste = tankungenVon(id);
+  if(liste.length < 2) return [];
+  const topf = {};
+  const dazu = (d, km) => {
+    const k = d.getFullYear() + "-" + pad(d.getMonth() + 1);
+    if(!topf[k]) topf[k] = { monat:k, km:0, tage:0 };
+    topf[k].km += km; topf[k].tage += 1;
+  };
+  for(let i = 1; i < liste.length; i++){
+    const von = parseYmd(liste[i-1].datum), bis = parseYmd(liste[i].datum);
+    const tage = Math.round((bis - von) / 86400000);
+    const strecke = liste[i].km - liste[i-1].km;
+    if(tage <= 0 || strecke <= 0) continue;
+    const proTag = strecke / tage;
+    for(let t = 0; t < tage; t++) dazu(addDays(von, t), proTag);
+  }
+  return Object.keys(topf).sort().reverse().slice(0, monate || 12).map(function(k){
+    const m = topf[k];
+    const jahr = +k.slice(0,4), nr = +k.slice(5) - 1;
+    const imMonat = new Date(jahr, nr + 1, 0).getDate();
+    return { monat:k, km:m.km, voll: m.tage >= imMonat,
+             titel: MONATE[nr].slice(0,3) + " " + jahr };
+  });
+}
+function monatsBalkenHtml(id){
+  const reihe = kmProMonat(id, 12);
+  if(reihe.length < 1) return "";
+  const hoechst = Math.max.apply(null, reihe.map(m => m.km)) || 1;
+  const voll = reihe.filter(m => m.voll);
+  const schnitt = voll.length ? voll.reduce((n, m) => n + m.km, 0) / voll.length : null;
+  return '<div class="monatsreihe">' +
+    '<h4>Kilometer je Monat <small>geschätzt</small></h4>' +
+    reihe.map(m =>
+      '<div class="monatszeile' + (m.voll ? "" : " teil") + '">' +
+        '<span class="mm">' + esc(m.titel) + '</span>' +
+        '<span class="mb"><span style="width:' + Math.max(2, Math.round(m.km * 100 / hoechst)) + '%"></span></span>' +
+        '<span class="mz">' + zahl(m.km, 0) + '</span>' +
+      '</div>').join("") +
+    '<span class="hint">' +
+      (schnitt != null ? "Im Schnitt " + zahl(schnitt, 0) + " km je vollem Monat. " : "") +
+      "Angefangene Monate sind blasser — dort fehlen Tage vor der ersten oder nach der letzten Tankung." +
+    '</span>' +
+  '</div>';
+}
+
 function kachel(titel, wert, klein){
   return '<div class="kachel"><span class="kt">' + titel + '</span><span class="kw">' + wert + '</span>' +
     (klein ? '<span class="kk">' + klein + '</span>' : "") + '</div>';
@@ -3053,6 +3113,7 @@ function auswertungAnsicht(){
       '</tbody></table>' +
       (c.tankgroesse && g.verbrauch ? '<span class="hint">Reichweite mit vollem Tank (' + zahl(c.tankgroesse, 0) + ' l): rund ' +
         zahl(c.tankgroesse * 100 / g.verbrauch, 0) + ' km</span>' : "") +
+      monatsBalkenHtml(c.id) +
     '</div>';
   };
   return '<div class="agenda" style="max-width:720px">' +
