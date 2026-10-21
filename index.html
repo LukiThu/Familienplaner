@@ -303,24 +303,20 @@ button.pill:hover{filter:brightness(1.08)}
 .kuechenleiste .spacer{flex:1 1 auto}
 .vorrat .aufgabe-haken{min-height:48px;padding:8px 12px}
 .vorrat .meta{color:var(--accent)}
-.ampel{display:flex;gap:3px;flex:none;align-self:center;margin-right:7px}
-.ampel button{
-  min-width:56px;height:34px;padding:0 6px;border-radius:8px;border:1px solid var(--line);
-  background:var(--surface-3);font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
+.fehlthaken{
+  flex:none;align-self:center;margin-right:7px;height:34px;padding:0 11px;border-radius:8px;
+  border:1px solid var(--line);background:var(--surface-3);font-size:13px;font-weight:600;
+  color:var(--muted);cursor:pointer;white-space:nowrap;
 }
-.ampel button[aria-pressed="true"][data-s="genug"]{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
-.ampel button[aria-pressed="true"][data-s="knapp"]{background:var(--knapp);border-color:var(--knapp);color:var(--knapp-text)}
-.ampel button[aria-pressed="true"][data-s="leer"]{background:var(--danger);border-color:var(--danger);color:#fff}
-.vorrat.s-leer{border-left:5px solid var(--danger)}
-.vorrat.s-knapp{border-left:5px solid var(--knapp)}
+.fehlthaken[aria-pressed="true"]{background:var(--danger);border-color:var(--danger);color:#fff}
+.vorrat.fehlt{border-left:5px solid var(--danger)}
 .zaehler{display:flex;align-items:center;gap:4px;flex:none;align-self:center;margin-right:7px}
 .zaehler button{
   width:36px;height:34px;border-radius:8px;border:1px solid var(--line);
   background:var(--surface-3);font-size:18px;font-weight:700;color:var(--text);cursor:pointer;
 }
 .zaehler .stand{min-width:86px;text-align:center;font-size:13px;font-weight:600;color:var(--muted)}
-.vorrat.s-knapp .zaehler .stand{color:var(--knapp)}
-.vorrat.s-leer .zaehler .stand{color:var(--danger)}
+.zaehler .stand.null{color:var(--danger);font-weight:700}
 .kueche-suche{width:100%}
 .vorschlag-anker{position:relative;flex:1 1 auto;min-width:0;display:flex}
 .vorschlag-anker input{flex:1 1 auto;min-width:0;width:100%}
@@ -496,7 +492,7 @@ button.pill:hover{filter:brightness(1.08)}
 .artikel .kasten{font-size:18px;color:var(--muted);background:none}
 .artikel .aufgabe-haken[disabled]{opacity:.55}
 .artikel .aufgabe-haken[disabled] .kasten{background:var(--accent);border-color:var(--accent);color:#fff}
-.zutatzeile .ampel, .zutatzeile .zaehler{margin-right:0}
+.zutatzeile .fehlthaken, .zutatzeile .zaehler{margin-right:0}
 .zutatzeile .kopf .btn{min-height:34px;height:34px;padding:0 12px;font-size:13.5px}
 .zutatzeile .kein-lager{font-size:13px;color:var(--muted);white-space:nowrap}
 .zutatzeile .gerichtchips{display:flex;gap:5px;flex-wrap:wrap}
@@ -526,8 +522,9 @@ button.pill:hover{filter:brightness(1.08)}
   .kuechenleiste.wischbar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -10px;padding:0 10px}
   .kuechenleiste.wischbar::-webkit-scrollbar{display:none}
   .kuechenleiste.wischbar > *{flex:none;white-space:nowrap}
-  .ampel button{min-width:44px;font-size:12px}
+  .fehlthaken{padding:0 8px;font-size:12px}
   .zaehler .stand{min-width:72px;font-size:12px}
+  .zaehler button{width:32px}
   .gerichte{grid-template-columns:1fr}
 }
 .bereichrow input{flex:1 1 auto;min-width:0}
@@ -703,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-21 14:48";
+const FASSUNG = "2026-10-21 15:17";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1562,7 +1559,6 @@ function bereichRaten(text){
    Mengenangaben davor zählen nicht („2 Dosen Tomaten“ = „Tomaten“).
    ========================================================= */
 
-const AMPEL = [["genug","genug"],["knapp","knapp"],["leer","leer"]];
 
 /* Gezählter Bestand. Die Einheit ist nur ein Wort hinter der Zahl —
    nichts wird umgerechnet, „2 Packungen“ bleibt „2 Packungen“.
@@ -1591,10 +1587,12 @@ function bestandText(p){
   const e = einheitText(p.einheit, p.bestand);
   return mengeText(p.bestand) + (e ? " " + e : "");
 }
-// Die Ampel rechnet sich aus dem Bestand: 0 ist leer, bis „knapp ab“ knapp.
-function statusAus(bestand, mindest){
-  const b = Number(bestand), m = (mindest == null || mindest === "") ? 1 : Number(mindest);
-  return b <= 0 ? "leer" : (b <= m ? "knapp" : "genug");
+// Fehlt heißt: steht auf der Einkaufsliste oder ist gezählt und bei null.
+// Was nicht gezählt wird, sagt von sich aus nichts — wie Frisches.
+function fehltVorrat(p, liste){
+  if(!p) return false;
+  const da = liste || aufDerListe();
+  return !!da[eintragKern(p.name)] || (gezaehlt(p) && Number(p.bestand) === 0);
 }
 // Nach dem Einkauf: auf „voll bei“ auffüllen, sonst einfach eins mehr.
 function vollerStand(p){
@@ -1611,14 +1609,14 @@ function zutatenVon(g){
 function zutatText(z){ return (z.menge ? z.menge + " " : "") + z.name; }
 // Fehlt etwas? Nur Vorräte zählen — Frisches wird ohnehin frisch gekauft.
 function zutatenStand(g){
+  const liste = aufDerListe();
   const vorraete = zutatenVon(g).map(z => vorratZu(z.name)).filter(Boolean);
   return {
-    leer:  vorraete.filter(p => p.status === "leer"),
-    knapp: vorraete.filter(p => p.status === "knapp"),
+    fehlt: vorraete.filter(p => fehltVorrat(p, liste)),
     anzahl: vorraete.length
   };
 }
-function imHaus(g){ return zutatenStand(g).leer.length === 0; }
+function imHaus(g){ return zutatenStand(g).fehlt.length === 0; }
 
 /* =========================================================
    Offline lesen: letzten Stand im Gerät behalten
@@ -2572,28 +2570,34 @@ function aufDerListe(){
   eintraegeVon(l).forEach(e => { if(!e.erledigt) da[eintragKern(e.text)] = true; });
   return da;
 }
-// Gezählte Vorräte bekommen − und +, alle anderen die Ampel.
-function standSteuerung(p){
-  if(gezaehlt(p)){
-    const knopf = (d, zeichen, text) =>
-      '<button type="button" data-act="vorrat-zaehlen" data-id="' + p.id + '" data-d="' + d + '" aria-label="' + text + '">' + zeichen + '</button>';
-    return '<div class="zaehler" role="group" aria-label="Bestand">' +
-      knopf(-1, "&#8722;", "einen weniger") +
-      '<span class="stand">' + esc(bestandText(p)) + '</span>' +
-      knopf(1, "+", "einen mehr") +
-    '</div>';
-  }
-  return '<div class="ampel" role="group" aria-label="Vorrat">' + AMPEL.map(a =>
-    '<button type="button" data-act="vorrat-status" data-id="' + p.id + '" data-s="' + a[0] + '" aria-pressed="' + (p.status === a[0]) + '">' + a[1] + '</button>').join("") + '</div>';
+// Gezählte Vorräte bekommen − und +; das Häkchen setzt sie auf die Einkaufsliste.
+function standSteuerung(p, liste){
+  const zaehler = gezaehlt(p)
+    ? (function(){
+        const knopf = (d, zeichen, text) =>
+          '<button type="button" data-act="vorrat-zaehlen" data-id="' + p.id + '" data-d="' + d + '" aria-label="' + text + '">' + zeichen + '</button>';
+        return '<div class="zaehler" role="group" aria-label="Bestand">' +
+          knopf(-1, "&#8722;", "einen weniger") +
+          '<span class="stand' + (Number(p.bestand) === 0 ? " null" : "") + '">' + esc(bestandText(p)) + '</span>' +
+          knopf(1, "+", "einen mehr") +
+        '</div>';
+      })()
+    : "";
+  const drauf = !!(liste || aufDerListe())[eintragKern(p.name)];
+  return zaehler +
+    '<button class="fehlthaken" type="button" data-act="vorrat-fehlt" data-id="' + p.id + '" aria-pressed="' + drauf + '" ' +
+      'title="' + (drauf ? "von der Einkaufsliste nehmen" : "auf die Einkaufsliste setzen") + '">' +
+      (drauf ? "&#10003; fehlt" : "fehlt") + '</button>';
 }
 function vorratZeile(p, liste){
-  return '<div class="aufgabe eintrag vorrat s-' + p.status + '">' +
+  const drauf = !!liste[eintragKern(p.name)];
+  return '<div class="aufgabe eintrag vorrat' + (fehltVorrat(p, liste) ? " fehlt" : "") + '">' +
     '<button class="aufgabe-haken" data-act="vorrat-oeffnen" data-id="' + p.id + '">' +
       '<span class="wort"><span class="titel">' + esc(p.name) + '</span>' +
-        (liste[eintragKern(p.name)] ? '<span class="meta">steht auf der Einkaufsliste</span>' : "") +
+        (drauf ? '<span class="meta">steht auf der Einkaufsliste</span>' : "") +
       '</span>' +
     '</button>' +
-    standSteuerung(p) +
+    standSteuerung(p, liste) +
   '</div>';
 }
 // Sucht auch mitten im Wort und ohne Rücksicht auf Umlaute.
@@ -2607,7 +2611,7 @@ function kuecheSuchfeld(platzhalter){
 // Wie viele Vorräte knapp oder leer sind und noch nicht auf der Liste stehen.
 function fehlendeVorraete(){
   const liste = aufDerListe();
-  return state.pantry.filter(p => p.status !== "genug" && !liste[eintragKern(p.name)]).length;
+  return state.pantry.filter(p => gezaehlt(p) && Number(p.bestand) === 0 && !liste[eintragKern(p.name)]).length;
 }
 function einkaufKnopf(){
   const n = fehlendeVorraete();
@@ -2624,7 +2628,7 @@ function lagerTreffer(){
   const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
   const such = suchText(state.kuecheSuche.trim());
-  const zeigen = state.pantry.filter(p => (!nurKnapp || p.status !== "genug") && ortPasst(p) &&
+  const zeigen = state.pantry.filter(p => (!nurKnapp || fehltVorrat(p, liste)) && ortPasst(p) &&
       (!such || suchText(p.name).indexOf(such) >= 0))
     .slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
   const bereiche = orte();
@@ -2633,7 +2637,7 @@ function lagerTreffer(){
   if(!state.pantry.length){
     inhalt = '<p class="empty">Noch nichts im Lager. Trag ein, was ihr üblicherweise daheim habt — Nudeln, Reis, Mehl, Konserven … Frisches wie Milch oder Gemüse braucht es hier nicht.</p>';
   }else if(!zeigen.length){
-    inhalt = '<p class="empty">' + (such ? "Nichts gefunden." : nurKnapp ? "Nichts knapp, nichts leer." : "Hier liegt noch nichts.") + '</p>';
+    inhalt = '<p class="empty">' + (such ? "Nichts gefunden." : nurKnapp ? "Es fehlt nichts." : "Hier liegt noch nichts.") + '</p>';
   }else{
     bereiche.concat([""]).forEach(function(b){
       const drin = zeigen.filter(p => b ? p.bereich === b : bereiche.indexOf(p.bereich) < 0);
@@ -2661,7 +2665,7 @@ function lagerAnsicht(){
   return '<div class="agenda" style="max-width:640px">' +
     '<div class="kuechenleiste">' +
       '<button class="fchip" data-act="lager-filter" data-f="alle" aria-pressed="' + !nurKnapp + '">Alles</button>' +
-      '<button class="fchip" data-act="lager-filter" data-f="knapp" aria-pressed="' + nurKnapp + '">Knapp &amp; leer</button>' +
+      '<button class="fchip" data-act="lager-filter" data-f="knapp" aria-pressed="' + nurKnapp + '">Fehlt</button>' +
       '<span class="spacer"></span>' + einkaufKnopf() +
     '</div>' +
     lagerOrtLeiste() +
@@ -2696,8 +2700,7 @@ function gerichtKarte(g){
     '<span class="seit">' + esc(seitText(g)) + '</span>' +
     (marken ? '<span class="marken">' + marken + '</span>' : "") +
     (zutatenVon(g).length ? '<span class="zutaten">' + esc(zutatenVon(g).map(zutatText).join(" · ")) + '</span>' : "") +
-    (st.leer.length ? '<span class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</span>' : "") +
-    (st.knapp.length ? '<span class="knapp">Knapp: ' + esc(st.knapp.map(p => p.name).join(", ")) + '</span>' : "") +
+    (st.fehlt.length ? '<span class="fehlt">Fehlt: ' + esc(st.fehlt.map(p => p.name).join(", ")) + '</span>' : "") +
   '</button>';
 }
 function gerichteTreffer(){
@@ -2756,7 +2759,7 @@ function zutatenTreffer(){
     (!such || suchText([e.name].concat(e.auch).join(" ")).indexOf(such) >= 0) &&
     (f !== "ohneLager" || !e.vorrat) &&
     (f !== "ohneGericht" || !e.gerichte.length) &&
-    (f !== "fehlt" || (e.vorrat && e.vorrat.status === "leer")));
+    (f !== "fehlt" || fehltVorrat(e.vorrat)));
   const zeile = e =>
     '<div class="zutatzeile">' +
       '<div class="kopf">' +
@@ -2764,7 +2767,7 @@ function zutatenTreffer(){
           '<small class="zbereich">' + esc(e.ort || (e.vorrat ? "ohne Ort" : "nicht im Lager")) + '</small>' +
           (e.auch.length ? '<small>auch: ' + esc(e.auch.join(", ")) + '</small>' : "") + '</button>' +
         (e.vorrat
-          ? standSteuerung(e.vorrat)
+          ? standSteuerung(e.vorrat, aufDerListe())
           : '<button class="btn" data-act="zutat-ins-lager" data-name="' + esc(e.name) + '">ins Lager</button>') +
       '</div>' +
       '<div class="gerichtchips">' +
@@ -2877,7 +2880,7 @@ function planEintragZeile(e){
   return '<div class="planeintrag">' +
     (g ? '<button class="pname" data-act="gericht-oeffnen" data-id="' + g.id + '">' : '<span class="pname notiz">') +
       '<b>' + esc(planName(e)) + '</b>' +
-      (st && st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : "") +
+      (st && st.fehlt.length ? '<small class="fehlt">Fehlt: ' + esc(st.fehlt.map(p => p.name).join(", ")) + '</small>' : "") +
     (g ? '</button>' : '</span>') +
     (heuteSchon ? "" : '<button class="btn icon ghost gekocht" data-act="plan-gekocht" data-id="' + e.id +
       '" aria-label="heute gekocht" title="heute gekocht">&#10003;</button>') +
@@ -3624,7 +3627,6 @@ function vorratLesen(){
   const b = $("#vo-bereich"); if(b) v.bereich = b.value;
   const ei = $("#vo-einheit"); if(ei) v.einheit = ei.value;
   const be = $("#vo-bestand"); if(be) v.bestand = be.value;
-  const mi = $("#vo-mindest"); if(mi) v.mindest = mi.value;
   const so = $("#vo-soll"); if(so) v.soll = so.value;
 }
 function dialogVorrat(){
@@ -3643,13 +3645,9 @@ function dialogVorrat(){
         '<input id="vo-einheit" type="text" list="einheiten" value="' + esc(v.einheit) + '" placeholder="Stück, Glas …" autocomplete="off"></div>' +
     '</div>' +
     '<datalist id="einheiten">' + EINHEITEN.map(e => '<option value="' + esc(e) + '"></option>').join("") + '</datalist>' +
-    '<div class="row">' +
-      '<div class="field"><label for="vo-mindest">knapp ab</label>' +
-        '<input id="vo-mindest" type="text" inputmode="decimal" value="' + esc(v.mindest) + '" placeholder="1" autocomplete="off"></div>' +
-      '<div class="field"><label for="vo-soll">voll bei</label>' +
-        '<input id="vo-soll" type="text" inputmode="decimal" value="' + esc(v.soll) + '" placeholder="eins mehr" autocomplete="off"></div>' +
-    '</div>' +
-    '<span class="hint">Bestand leer lassen heißt: nicht zählen, dann bleibt die Ampel von Hand. Mit einer Zahl stehen − und + im Lager, und die Ampel rechnet sich selbst: 0 ist leer, bis „knapp ab“ knapp. „voll bei“ ist der Stand nach dem Einkauf.</span>' +
+    '<div class="field"><label for="vo-soll">voll bei</label>' +
+      '<input id="vo-soll" type="text" inputmode="decimal" value="' + esc(v.soll) + '" placeholder="eins mehr" autocomplete="off"></div>' +
+    '<span class="hint">Mit einer Zahl im Bestand stehen − und + im Lager; eine 0 fällt rot auf. Ohne Zahl wird einfach nicht gezählt. „voll bei“ ist der Stand, auf den nach dem Abhaken im Laden aufgefüllt wird.</span>' +
     '<span class="hint">Gleicher Name wie in Einkaufsliste und Zutaten, dann hängt alles zusammen. Wo der Artikel im Geschäft steht, merkt sich der Artikelstamm.</span>' +
     '<div class="actions">' +
       (v.id ? '<button class="btn danger" type="button" data-act="vorrat-loeschen">Löschen</button>' : "") +
@@ -3791,7 +3789,7 @@ function auswahlKnopf(g, act, tag){
   return '<button type="button" class="auswahl" data-act="' + act + '" data-id="' + g.id + '"' + (tag ? ' data-tag="' + tag + '"' : "") + '>' +
     '<b>' + esc(g.name) + '</b>' +
     '<small>' + [g.dauer_min ? g.dauer_min + " Min." : "", g.vegetarisch ? "vegetarisch" : "", g.kinder ? "Kinder mögen’s" : ""].filter(Boolean).join(" · ") + '</small>' +
-    (st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : "") +
+    (st.fehlt.length ? '<small class="fehlt">Fehlt: ' + esc(st.fehlt.map(p => p.name).join(", ")) + '</small>' : "") +
   '</button>';
 }
 function planTreffer(){
@@ -3839,8 +3837,8 @@ function dialogHeuteKochen(){
 }
 
 // Was für die geplanten Gerichte (ab heute, in der gezeigten Woche) zu kaufen ist.
-// Frisches (nicht im Lager) und Leeres ist vorausgewählt, Knappes nicht,
-// Volles taucht gar nicht auf.
+// Frisches (nicht im Lager) und Fehlendes ist vorausgewählt; Ungezähltes steht
+// da, ohne Haken. Was gezählt und noch da ist, taucht gar nicht auf.
 function wochenBedarf(){
   const mo = planMontag(), heute = ymd(new Date()), bis = ymd(addDays(mo, 6)), von = ymd(mo) > heute ? ymd(mo) : heute;
   const da = aufDerListe(), nach = {};
@@ -3849,8 +3847,9 @@ function wochenBedarf(){
     zutatenVon(g).forEach(z => {
       const k = eintragKern(z.name); if(!k) return;
       const v = vorratZu(z.name);
-      if(v && v.status === "genug") return;
-      if(!nach[k]) nach[k] = { key:k, name: v ? v.name : z.name, mengen:[], gerichte:[], vorrat:v, drauf: !!da[k] };
+      const fehlt = v ? fehltVorrat(v, da) : true;
+      if(v && !fehlt && gezaehlt(v)) return;
+      if(!nach[k]) nach[k] = { key:k, name: v ? v.name : z.name, mengen:[], gerichte:[], vorrat:v, fehlt:fehlt, drauf: !!da[k] };
       if(z.menge) nach[k].mengen.push(z.menge);
       if(nach[k].gerichte.indexOf(g.name) < 0) nach[k].gerichte.push(g.name);
     });
@@ -3865,9 +3864,12 @@ function dialogWochenEinkauf(){
   const liste = wochenBedarf();
   const zeile = b =>
     '<label class="check bedarf' + (b.drauf ? " drauf" : "") + '">' +
-      '<input type="checkbox" data-key="' + esc(b.key) + '"' + (b.drauf ? " disabled" : (!b.vorrat || b.vorrat.status === "leer" ? " checked" : "")) + '>' +
+      '<input type="checkbox" data-key="' + esc(b.key) + '"' + (b.drauf ? " disabled" : (b.fehlt ? " checked" : "")) + '>' +
       '<span><b>' + esc(bedarfText(b)) + '</b>' +
-        '<small>' + (b.drauf ? "steht schon auf der Liste" : (b.vorrat ? "im Lager " + b.vorrat.status : "frisch")) + ' · ' + esc(b.gerichte.join(", ")) + '</small></span>' +
+        '<small>' + (b.drauf ? "steht schon auf der Liste"
+            : !b.vorrat ? "frisch"
+            : gezaehlt(b.vorrat) ? "im Lager: " + bestandText(b.vorrat)
+            : "im Lager, nicht gezählt") + ' · ' + esc(b.gerichte.join(", ")) + '</small></span>' +
     '</label>';
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="wochen-einkauf-los">' +
     '<h2>Einkauf für die Woche</h2>' +
@@ -3894,7 +3896,7 @@ function dialogWuerfel(){
     '<div class="wurf">' +
       '<b>' + esc(g.name) + '</b>' +
       '<small>' + esc(seitText(g)) + (g.dauer_min ? " · " + g.dauer_min + " Min." : "") + (g.idee ? " · zum Ausprobieren" : "") + '</small>' +
-      (st.leer.length ? '<small class="fehlt">Fehlt: ' + esc(st.leer.map(p => p.name).join(", ")) + '</small>' : '<small class="da">Aus dem Lager ist alles da</small>') +
+      (st.fehlt.length ? '<small class="fehlt">Fehlt: ' + esc(st.fehlt.map(p => p.name).join(", ")) + '</small>' : '<small class="da">Aus dem Lager ist alles da</small>') +
     '</div>' +
     '<div class="field"><label for="wuerfel-tag">Einplanen für</label><select id="wuerfel-tag">' +
       tage.map(d => '<option value="' + ymd(d) + '"' + (ymd(d) === w.tag ? " selected" : "") + '>' + (sameDay(d, heute) ? "Heute" : WDLANG[(d.getDay()+6)%7]) + ", " + d.getDate() + "." + (d.getMonth()+1) + ".</option>").join("") +
@@ -4366,7 +4368,7 @@ async function aktion(act, el){
       if(b === "kueche"){
         if(state.view === "gerichte") state.gericht = neuesGericht(null);
         else if(state.view === "essen") state.planDialog = { tag: ymd(planMontag()), mahlzeit:"woche", suche:"" };
-        else state.vorrat = { id:null, name:"", bereich:"", einheit:"", bestand:"", mindest:"", soll:"" };
+        else state.vorrat = { id:null, name:"", bereich:"", einheit:"", bestand:"", soll:"" };
         overlayOeffnen(); return render();
       }
       if(b === "listen"){
@@ -4514,12 +4516,12 @@ async function aktion(act, el){
       return render();
     }
     case "lager-einkaufen": return vorraeteAufListe();
-    case "vorrat-status": return vorratStatus(el.dataset.id, el.dataset.s);
+    case "vorrat-fehlt": return vorratFehlt(el.dataset.id);
     case "vorrat-zaehlen": return vorratZaehlen(el.dataset.id, +el.dataset.d);
     case "vorrat-oeffnen": {
       const p = state.pantry.find(x => x.id === el.dataset.id); if(!p) return;
       state.vorrat = { id:p.id, name:p.name, bereich:p.bereich || "", einheit:p.einheit || "",
-                       bestand: zahlFeld(p.bestand), mindest: zahlFeld(p.mindest), soll: zahlFeld(p.soll) };
+                       bestand: zahlFeld(p.bestand), soll: zahlFeld(p.soll) };
       overlayOeffnen(); return render();
     }
     case "vorrat-loeschen": return vorratLoeschen();
@@ -5387,7 +5389,7 @@ async function eintragUmschalten(id){
     if(p && gezaehlt(p)){
       const voll = vollerStand(p);
       if(voll !== Number(p.bestand)) await vorratStand(p.id, voll);
-    }else if(p && p.status !== "genug") await vorratStatus(p.id, "genug");
+    }
     datenSichern();
   }catch(err){
     await listenLaden();
@@ -5450,28 +5452,39 @@ async function vorratZaehlen(id, d){
 }
 async function vorratStand(id, bestand){
   const p = state.pantry.find(x => x.id === id); if(!p) return;
-  const status = statusAus(bestand, p.mindest);
-  state.pantry = state.pantry.map(x => x.id === id ? Object.assign({}, x, { bestand:bestand, status:status }) : x);
+  state.pantry = state.pantry.map(x => x.id === id ? Object.assign({}, x, { bestand:bestand }) : x);
   render();
   try{
-    const r = await sb.from("pantry_items").update({ bestand:bestand, status:status }).eq("id", id);
+    const r = await sb.from("pantry_items").update({ bestand:bestand }).eq("id", id);
     if(r.error) throw r.error;
     datenSichern();
   }catch(err){
     await kuecheLaden(); setToast(fehlerText(err)); render();
   }
 }
-async function vorratStatus(id, status){
-  const p = state.pantry.find(x => x.id === id); if(!p || p.status === status) return;
-  state.pantry = state.pantry.map(x => x.id === id ? Object.assign({}, x, { status:status }) : x);
-  render();
+// Häkchen „fehlt“: setzt den Vorrat auf die Einkaufsliste oder nimmt ihn
+// wieder herunter. Ein zweiter Zustand ist nicht nötig.
+async function vorratFehlt(id){
+  const p = state.pantry.find(x => x.id === id); if(!p) return;
+  const liste = einkaufsliste();
+  if(!liste){ setToast("Es gibt noch keine Einkaufsliste"); return; }
+  const k = eintragKern(p.name);
+  const offen = eintraegeVon(liste).filter(e => !e.erledigt && eintragKern(e.text) === k);
   try{
-    const r = await sb.from("pantry_items").update({ status:status }).eq("id", id);
-    if(r.error) throw r.error;
-    datenSichern();
-  }catch(err){
-    await kuecheLaden(); setToast(fehlerText(err)); render();
-  }
+    if(offen.length){
+      for(let i = 0; i < offen.length; i++){
+        const r = await sb.from("list_items").delete().eq("id", offen[i].id);
+        if(r.error) throw r.error;
+      }
+      chronikPruefen();
+    }else{
+      const r = await sb.from("list_items").insert({ household_id: state.membership.household_id,
+        list_id: liste.id, text: p.name, bereich: bereichRaten(p.name) });
+      if(r.error) throw r.error;
+    }
+    await listenLaden(); datenSichern();
+  }catch(err){ setToast(fehlerText(err)); }
+  render();
 }
 async function vorratSpeichern(){
   vorratLesen();
@@ -5481,14 +5494,11 @@ async function vorratSpeichern(){
   if(andere){ setToast("„" + andere.name + "“ steht schon im Lager"); return; }
   try{
     const bestand = kommaZahl(v.bestand) == null ? null : Math.max(0, kommaZahl(v.bestand));
-    const mindest = kommaZahl(v.mindest) == null ? null : Math.max(0, kommaZahl(v.mindest));
     const feld = { name:name, bereich: v.bereich || "", einheit: (v.einheit || "").trim(),
-                   bestand:bestand, mindest:mindest, soll: kommaZahl(v.soll) };
-    // Wird gezählt, bestimmt der Bestand die Ampel.
-    if(bestand != null) feld.status = statusAus(bestand, mindest);
+                   bestand:bestand, soll: kommaZahl(v.soll) };
     const r = v.id
       ? await sb.from("pantry_items").update(feld).eq("id", v.id)
-      : await sb.from("pantry_items").insert(Object.assign({ household_id: state.membership.household_id, status:"genug" }, feld));
+      : await sb.from("pantry_items").insert(Object.assign({ household_id: state.membership.household_id }, feld));
     if(r.error) throw r.error;
     state.vorrat = null; chronikPruefen();
     await kuecheLaden(); datenSichern();
@@ -5512,7 +5522,7 @@ async function vorraeteAufListe(){
   const liste = einkaufsliste();
   if(!liste){ setToast("Es gibt noch keine Einkaufsliste"); return; }
   const da = aufDerListe();
-  const neu = state.pantry.filter(p => p.status !== "genug" && !da[eintragKern(p.name)]);
+  const neu = state.pantry.filter(p => gezaehlt(p) && Number(p.bestand) === 0 && !da[eintragKern(p.name)]);
   if(!neu.length) return;
   try{
     const r = await sb.from("list_items").insert(neu.map(p => ({
@@ -5530,7 +5540,7 @@ async function zutatInsLager(name){
   if(vorratZu(name)) return;
   try{
     const r = await sb.from("pantry_items").insert({ household_id: state.membership.household_id, name:name,
-      bereich: bereichRaten(name), status:"genug" }).select("*").single();
+      bereich: bereichRaten(name) }).select("*").single();
     if(r.error) throw r.error;
     state.pantry = state.pantry.concat([r.data]);
     datenSichern();
