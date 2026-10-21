@@ -703,7 +703,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-21 14:40";
+const FASSUNG = "2026-10-21 14:48";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -773,7 +773,7 @@ const state = {
   tasks:[], erledigt:[], aufgabe:null,
   lists:[], listItems:[], listeAktiv: localStorage.getItem("fp.liste") || null, eintrag:null, listeDialog:null,
   filterOffen:false,
-  pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", gerichtFilter:[], kuecheSuche:"",
+  pantry:[], dishes:[], vorrat:null, gericht:null, lagerFilter:"alle", lagerOrt:"", gerichtFilter:[], kuecheSuche:"",
   cars:[], fuelings:[], autoAktiv: localStorage.getItem("fp.auto") || null, tankung:null, autoDialog:null,
   planDatum:null,
   zutatFilter:"", zutatDialog:null, artikel:[], artikelDialog:null,
@@ -2613,11 +2613,19 @@ function einkaufKnopf(){
   const n = fehlendeVorraete();
   return n ? '<button class="btn" data-act="lager-einkaufen">' + n + ' auf die Einkaufsliste</button>' : "";
 }
+// Kennung für den Filter „Ohne Ort“ — ein Ort heißt nie so.
+const ORT_OHNE = "*ohne*";
+function ortPasst(p){
+  const f = state.lagerOrt;
+  if(!f) return true;
+  return f === ORT_OHNE ? orte().indexOf(p.bereich) < 0 : p.bereich === f;
+}
 function lagerTreffer(){
   const liste = aufDerListe();
   const nurKnapp = state.lagerFilter === "knapp";
   const such = suchText(state.kuecheSuche.trim());
-  const zeigen = state.pantry.filter(p => (!nurKnapp || p.status !== "genug") && (!such || suchText(p.name).indexOf(such) >= 0))
+  const zeigen = state.pantry.filter(p => (!nurKnapp || p.status !== "genug") && ortPasst(p) &&
+      (!such || suchText(p.name).indexOf(such) >= 0))
     .slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
   const bereiche = orte();
 
@@ -2625,7 +2633,7 @@ function lagerTreffer(){
   if(!state.pantry.length){
     inhalt = '<p class="empty">Noch nichts im Lager. Trag ein, was ihr üblicherweise daheim habt — Nudeln, Reis, Mehl, Konserven … Frisches wie Milch oder Gemüse braucht es hier nicht.</p>';
   }else if(!zeigen.length){
-    inhalt = '<p class="empty">' + (such ? "Nichts gefunden." : "Nichts knapp, nichts leer.") + '</p>';
+    inhalt = '<p class="empty">' + (such ? "Nichts gefunden." : nurKnapp ? "Nichts knapp, nichts leer." : "Hier liegt noch nichts.") + '</p>';
   }else{
     bereiche.concat([""]).forEach(function(b){
       const drin = zeigen.filter(p => b ? p.bereich === b : bereiche.indexOf(p.bereich) < 0);
@@ -2635,6 +2643,19 @@ function lagerTreffer(){
   }
   return inhalt;
 }
+// Zweite Zeile: nach Ort umschalten. Nochmals tippen zeigt wieder alle.
+function lagerOrtLeiste(){
+  const bereiche = orte();
+  const ohne = state.pantry.some(p => bereiche.indexOf(p.bereich) < 0);
+  if(!bereiche.length && !ohne) return "";
+  const chip = (wert, text) =>
+    '<button class="fchip" data-act="lager-ort" data-o="' + esc(wert) + '" aria-pressed="' + (state.lagerOrt === wert) + '">' + esc(text) + '</button>';
+  return '<div class="kuechenleiste wischbar">' +
+    chip("", "Alle Orte") +
+    bereiche.map(b => chip(b, b)).join("") +
+    (ohne ? chip(ORT_OHNE, "Ohne Ort") : "") +
+  '</div>';
+}
 function lagerAnsicht(){
   const nurKnapp = state.lagerFilter === "knapp";
   return '<div class="agenda" style="max-width:640px">' +
@@ -2643,6 +2664,7 @@ function lagerAnsicht(){
       '<button class="fchip" data-act="lager-filter" data-f="knapp" aria-pressed="' + nurKnapp + '">Knapp &amp; leer</button>' +
       '<span class="spacer"></span>' + einkaufKnopf() +
     '</div>' +
+    lagerOrtLeiste() +
     (state.pantry.length > 8 ? kuecheSuchfeld("Im Lager suchen") : "") +
     '<div id="kueche-treffer">' + lagerTreffer() + '</div>' +
   '</div>';
@@ -4486,6 +4508,11 @@ async function aktion(act, el){
     case "eintrag-loeschen": return eintragLoeschen();
     case "erledigte-weg": return erledigteEntfernen();
     case "lager-filter": state.lagerFilter = el.dataset.f; return render();
+    case "lager-ort": {
+      const o = el.dataset.o;
+      state.lagerOrt = (o && o === state.lagerOrt) ? "" : o;
+      return render();
+    }
     case "lager-einkaufen": return vorraeteAufListe();
     case "vorrat-status": return vorratStatus(el.dataset.id, el.dataset.s);
     case "vorrat-zaehlen": return vorratZaehlen(el.dataset.id, +el.dataset.d);
