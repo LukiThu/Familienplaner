@@ -700,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-21 15:26";
+const FASSUNG = "2026-10-21 16:02";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2587,7 +2587,7 @@ function standSteuerung(p, liste){
   return zaehler +
     '<button class="fehlthaken" type="button" data-act="vorrat-fehlt" data-id="' + p.id + '" aria-pressed="' + drauf + '" ' +
       'title="' + (drauf ? "von der Einkaufsliste nehmen" : "auf die Einkaufsliste setzen") + '">' +
-      (drauf ? "&#10003; fehlt" : "fehlt") + '</button>';
+      (drauf ? "&#10003; einkaufen" : "einkaufen") + '</button>';
 }
 function vorratZeile(p, liste){
   const drauf = !!liste[eintragKern(p.name)];
@@ -5489,20 +5489,34 @@ async function vorratFehlt(id){
   if(!liste){ setToast("Es gibt noch keine Einkaufsliste"); return; }
   const k = eintragKern(p.name);
   const offen = eintraegeVon(liste).filter(e => !e.erledigt && eintragKern(e.text) === k);
+  // Der Knopf zeigt die Änderung sofort; geschrieben wird danach. Geht es
+  // schief, kommt der alte Stand zurück — Warten muss man nie.
+  const vorher = state.listItems;
   try{
     if(offen.length){
+      state.listItems = state.listItems.filter(e => offen.indexOf(e) < 0);
+      render();
       for(let i = 0; i < offen.length; i++){
         const r = await sb.from("list_items").delete().eq("id", offen[i].id);
         if(r.error) throw r.error;
       }
       chronikPruefen();
     }else{
-      const r = await sb.from("list_items").insert({ household_id: state.membership.household_id,
-        list_id: liste.id, text: p.name, bereich: bereichRaten(p.name) });
+      const zeile = { household_id: state.membership.household_id,
+        list_id: liste.id, text: p.name, bereich: bereichRaten(p.name) };
+      const vorlaeufig = Object.assign({ id:"neu-" + Date.now(), erledigt:false,
+        created_at:new Date().toISOString() }, zeile);
+      state.listItems = state.listItems.concat([vorlaeufig]);
+      render();
+      const r = await sb.from("list_items").insert(zeile).select("*").single();
       if(r.error) throw r.error;
+      state.listItems = state.listItems.map(e => e === vorlaeufig ? Object.assign({}, vorlaeufig, r.data) : e);
     }
-    await listenLaden(); datenSichern();
-  }catch(err){ setToast(fehlerText(err)); }
+    datenSichern();
+  }catch(err){
+    state.listItems = vorher;
+    setToast(fehlerText(err));
+  }
   render();
 }
 async function vorratSpeichern(){
