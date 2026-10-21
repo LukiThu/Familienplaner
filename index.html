@@ -700,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-21 15:17";
+const FASSUNG = "2026-10-21 15:26";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -5284,7 +5284,26 @@ async function eintragHinzufuegen(){
   const text = (feld ? feld.value : "").trim();
   if(!text) return;
   // Mit Beistrich getrennt: „Milch, Brot, 2 Butter“ ergibt drei Einträge.
-  const teile = text.split(/[,;]+/).map(t => t.trim()).filter(Boolean);
+  const roh = text.split(/[,;]+/).map(t => t.trim()).filter(Boolean);
+  // Nichts doppelt: was offen auf dieser Liste steht, kommt kein zweites Mal
+  // darauf — auch nicht mit anderer Menge davor („2 Pkg Kaffee“ = „Kaffee“).
+  const schonDa = {};
+  eintraegeVon(liste).forEach(e => { if(!e.erledigt) schonDa[eintragKern(e.text)] = e.text; });
+  const teile = [], doppelt = [];
+  roh.forEach(function(t){
+    const k = eintragKern(t);
+    if(k && schonDa[k]){ doppelt.push(schonDa[k]); return; }
+    if(k) schonDa[k] = t;
+    teile.push(t);
+  });
+  if(!teile.length){
+    // Nichts Neues dabei — der Text bleibt stehen, damit du ihn ändern kannst.
+    setToast(doppelt.length === 1 ? "„" + doppelt[0] + "“ steht schon auf der Liste"
+                                  : doppelt.length + " Sachen stehen schon auf der Liste");
+    return;
+  }
+  if(doppelt.length) setToast(doppelt.length === 1 ? "„" + doppelt[0] + "“ stand schon auf der Liste"
+                                                   : doppelt.length + " Sachen standen schon auf der Liste");
   const gewaehlt = (sel && sel.value) || "";
   const zeilen = teile.map(t => ({
     household_id: state.membership.household_id, list_id: liste.id, text: t,
