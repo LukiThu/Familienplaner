@@ -700,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-21 16:02";
+const FASSUNG = "2026-10-27 20:25";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -881,6 +881,7 @@ async function listenLaden(){
 
 async function aufgabenLaden(){
   const hid = state.membership.household_id;
+  // Routinen häufen täglich Haken an — darum nur die letzten 35 Tage laden.
   const ab = ymd(addDays(startOfDay(new Date()), -35));
   const [auf, hak] = await Promise.all([
     sb.from("tasks").select("*").eq("household_id", hid).order("sortierung").order("titel"),
@@ -888,6 +889,21 @@ async function aufgabenLaden(){
   ]);
   if(!auf.error) state.tasks = auf.data || [];
   if(!hak.error) state.erledigt = hak.data || [];
+  // Einmalige Aufgaben bleiben dagegen ewig als „überfällig“ stehen. Ihre
+  // Haken müssen also auch dann mitkommen, wenn sie älter sind als das
+  // Fenster — sonst taucht längst Erledigtes wieder auf und lässt sich
+  // nicht abhaken: Der neue Haken fiele beim nächsten Laden wieder heraus.
+  const alteIds = state.tasks
+    .filter(a => !istRoutine(a) && a.faellig_am && a.faellig_am < ab)
+    .map(a => a.id);
+  if(alteIds.length){
+    const alt = await sb.from("task_completions").select("*").eq("household_id", hid).in("task_id", alteIds);
+    if(!alt.error && alt.data && alt.data.length){
+      const da = {};
+      state.erledigt.forEach(h => { da[h.task_id + "|" + h.tag] = true; });
+      state.erledigt = state.erledigt.concat(alt.data.filter(h => !da[h.task_id + "|" + h.tag]));
+    }
+  }
 }
 
 async function loadAll(){
@@ -4685,9 +4701,13 @@ async function aktion(act, el){
     case "einst-speichern": return einstellungenSpeichern();
     case "logout":
       if(channel){ sb.removeChannel(channel); channel=null; }
+      // Zuerst die Zuordnung weg: Ein Laden, das gerade noch läuft, darf
+      // danach nichts mehr in den Zwischenspeicher schreiben. Der Schlüssel
+      // hängt an der Anmeldung, also aufräumen, solange sie noch steht.
+      state.membership=null;
       datenVerwerfen();
       await sb.auth.signOut();
-      state.session=null; state.membership=null; state.settings=false;
+      state.session=null; state.settings=false;
       overlayChronikLoesen();
       return render();
   }
