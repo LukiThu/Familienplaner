@@ -700,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-10-27 20:25";
+const FASSUNG = "2026-11-24 20:32";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -1429,7 +1429,8 @@ const ICON = {
   vollbild:    (g) => svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path>', g),
   vollbildAus: (g) => svg('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"></path>', g),
   links:    (g) => svg('<path d="M14.5 6l-6 6 6 6"></path>', g),
-  rechts:   (g) => svg('<path d="M9.5 6l6 6-6 6"></path>', g)
+  rechts:   (g) => svg('<path d="M9.5 6l6 6-6 6"></path>', g),
+  weiter:   (g) => svg('<path d="M3.5 12h11M10.5 8l4 4-4 4M19 5.5v13"></path>', g)
 };
 
 /* =========================================================
@@ -2902,6 +2903,8 @@ function planEintragZeile(e){
       '" aria-label="heute gekocht" title="heute gekocht">&#10003;</button>') +
     '<button class="btn icon ghost" data-act="plan-datum" data-id="' + e.id + '" aria-label="auf ein Datum legen" title="auf ein Datum legen">' +
       ICON.kalender(17) + '</button>' +
+    '<button class="btn icon ghost" data-act="plan-naechste" data-id="' + e.id +
+      '" aria-label="in die nächste Woche schieben" title="in die nächste Woche schieben">' + ICON.weiter(17) + '</button>' +
     '<button class="btn icon ghost" data-act="plan-weg" data-id="' + e.id + '" aria-label="aus dem Plan nehmen">&#10005;</button>' +
   '</div>';
 }
@@ -4022,19 +4025,32 @@ function dialogAuto(){
   '</form></div>';
 }
 
+// Die Chips zeigen immer genau eine Woche. Mit den Pfeilen geht es eine
+// Woche weiter — damit lässt sich auch auf einen Tag der nächsten Woche
+// legen, was diese Woche nicht gekocht wurde.
 function dialogPlanDatum(){
   const p = state.planDatum;
   const e = state.plan.find(x => x.id === p.id);
   if(!e) return "";
-  const mo = planMontag(), heute = startOfDay(new Date());
+  const heute = startOfDay(new Date()), diese = mondayOf(heute);
+  const mo = p.woche ? parseYmd(p.woche) : planMontag(), so = addDays(mo, 6);
   const tage = [0,1,2,3,4,5,6].map(i => addDays(mo, i));
+  const wocheTxt = sameDay(mo, diese) ? "Diese Woche"
+                 : sameDay(mo, addDays(diese, 7)) ? "Nächste Woche"
+                 : sameDay(mo, addDays(diese, -7)) ? "Vorige Woche"
+                 : "KW " + kalenderwoche(mo);
   const chip = (txt, wert, aktiv) =>
     '<button class="fchip" type="button" data-act="plan-datum-setzen" data-d="' + wert + '" aria-pressed="' + !!aktiv + '">' + txt + '</button>';
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="plan-datum-speichern">' +
     '<h2>Wann?</h2>' +
     '<p class="hint" style="margin:0">' + esc(planName(e)) + '</p>' +
+    '<div class="plankopf" style="justify-content:center">' +
+      '<button class="btn icon ghost" type="button" data-act="plan-datum-woche" data-d="-1" aria-label="Woche zurück">' + ICON.links(18) + '</button>' +
+      '<div class="planwoche"><b>' + wocheTxt + '</b><span>' + mo.getDate() + "." + (mo.getMonth()+1) + ". – " + so.getDate() + "." + (so.getMonth()+1) + '.</span></div>' +
+      '<button class="btn icon ghost" type="button" data-act="plan-datum-woche" data-d="1" aria-label="Woche vor">' + ICON.rechts(18) + '</button>' +
+    '</div>' +
     '<div class="whopick">' +
-      chip("Diese Woche", "woche", istVorrat(e)) +
+      chip("Ohne festen Tag", "woche:" + ymd(mo), istVorrat(e) && e.tag === ymd(mo)) +
       tage.map(d => chip(WDS[(d.getDay()+6)%7] + " " + d.getDate() + ".", ymd(d),
         !istVorrat(e) && e.tag === ymd(d))).join("") +
     '</div>' +
@@ -4564,9 +4580,16 @@ async function aktion(act, el){
     case "plan-gekocht": return planGekocht(el.dataset.id);
     case "plan-datum": {
       if(!state.plan.some(x => x.id === el.dataset.id)) return;
-      state.planDatum = { id: el.dataset.id };
+      state.planDatum = { id: el.dataset.id, woche: null };
       overlayOeffnen(); return render();
     }
+    case "plan-datum-woche": {
+      if(!state.planDatum) return;
+      const mo = state.planDatum.woche ? parseYmd(state.planDatum.woche) : planMontag();
+      state.planDatum.woche = ymd(addDays(mo, 7 * (+el.dataset.d)));
+      return render();
+    }
+    case "plan-naechste": return planNaechsteWoche(el.dataset.id);
     case "plan-datum-setzen": return planVerschieben(state.planDatum.id, el.dataset.d);
     case "plan-als-gericht": {
       const t = (($("#plan-suche") || {}).value || "").trim();
@@ -5700,11 +5723,15 @@ async function gerichtAnlegenUndPlanen(name){
   state.busy = false; render();
 }
 
-// Einen Eintrag auf einen Tag legen — oder zurück in den Wochenvorrat.
+// Einen Eintrag auf einen Tag legen — oder in den Vorrat einer Woche:
+// „woche“ meint die eigene Woche des Eintrags, „woche:JJJJ-MM-TT“ die
+// Woche, in die dieses Datum fällt.
 async function planVerschieben(id, wert){
   const e = state.plan.find(x => x.id === id); if(!e || !wert) return;
-  const neu = wert === "woche"
-    ? { tag: ymd(mondayOf(e.tag ? parseYmd(e.tag) : new Date())), mahlzeit: "woche" }
+  const alt = mondayOf(e.tag ? parseYmd(e.tag) : new Date());
+  const vorrat = wert === "woche" || wert.indexOf("woche:") === 0;
+  const neu = vorrat
+    ? { tag: ymd(wert === "woche" ? alt : mondayOf(parseYmd(wert.slice(6)))), mahlzeit: "woche" }
     : { tag: wert, mahlzeit: "abend" };
   state.plan = state.plan.map(x => x.id === id ? Object.assign({}, x, neu) : x);
   state.planDatum = null; chronikPruefen();
@@ -5713,9 +5740,22 @@ async function planVerschieben(id, wert){
     const r = await sb.from("meal_plan").update(neu).eq("id", id);
     if(r.error) throw r.error;
     datenSichern();
-    setToast(wert === "woche" ? "In den Wochenvorrat gelegt" : "Auf " + tagKurz(parseYmd(wert)) + " gelegt");
+    const ziel = parseYmd(neu.tag);
+    setToast(!vorrat ? "Auf " + tagKurz(ziel) + " gelegt"
+           : sameDay(ziel, alt) ? "In den Wochenvorrat gelegt"
+           : "In KW " + kalenderwoche(ziel) + " verschoben");
   }catch(err){ await kuecheLaden(); setToast(fehlerText(err)); }
   render();
+}
+
+// Was diese Woche nicht gekocht wurde, braucht keinen neuen Eintrag: es
+// wandert in den Vorrat der nächsten Woche — ohne festen Tag, weil dort
+// ohnehin neu eingeteilt wird. Das gilt auch für einen Eintrag, der an
+// einem Tag hing.
+async function planNaechsteWoche(id){
+  const e = state.plan.find(x => x.id === id); if(!e) return;
+  const mo = mondayOf(e.tag ? parseYmd(e.tag) : new Date());
+  return planVerschieben(id, "woche:" + ymd(addDays(mo, 7)));
 }
 
 async function planEntfernen(id){
