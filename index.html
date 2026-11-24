@@ -700,7 +700,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-11-24 20:32";
+const FASSUNG = "2026-11-24 21:07";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -3763,7 +3763,7 @@ function dialogGericht(){
       (g.id ? '<button class="btn danger" type="button" data-act="gericht-loeschen">Löschen</button>' : "") +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
-      '<button class="btn primary" type="submit">Speichern</button>' +
+      '<button class="btn primary" type="submit"' + (state.busy ? " disabled" : "") + '>Speichern</button>' +
     '</div>' +
   '</form></div>';
 }
@@ -3797,6 +3797,17 @@ function dialogZutat(){
 }
 
 // Gerichte zum Auswählen: was ganz im Haus ist zuerst.
+// Zwei Gerichte heißen gleich, wenn sich nur Groß- und Kleinschreibung
+// oder Leerzeichen unterscheiden. Damit fängt die Rückfrage genau die
+// Fälle ab, die man in keiner Liste auseinanderhalten könnte.
+function gleicherName(a, b){
+  return suchText(String(a || "").trim().replace(/\s+/g, " ")) ===
+         suchText(String(b || "").trim().replace(/\s+/g, " "));
+}
+function gerichtMitNamen(name, ausser){
+  if(!String(name || "").trim()) return null;
+  return state.dishes.find(g => g.id !== ausser && gleicherName(g.name, name)) || null;
+}
 function gerichteZurAuswahl(such){
   const q = suchText((such || "").trim());
   return state.dishes
@@ -5705,8 +5716,18 @@ async function planGekocht(id){
 }
 
 // Ein Gericht, das es noch nicht gibt: nur der Name, alles andere später.
+// Gibt es den Namen schon, war der breite Knopf fast immer ein Vergreifen —
+// dann lieber das vorhandene Gericht einplanen.
 async function gerichtAnlegenUndPlanen(name){
   const d = state.planDialog; if(!d) return;
+  const schon = gerichtMitNamen(name);
+  if(schon){
+    const ja = await frage({ titel:"„" + schon.name + "“ gibt es schon",
+      text:"Ein Gericht mit diesem Namen steht schon in der Sammlung.",
+      knopf:"Vorhandenes einplanen" });
+    if(!ja || !state.planDialog) return;
+    return planEintragen(state.planDialog.tag, schon.id, "", state.planDialog.mahlzeit);
+  }
   state.busy = true; render();
   try{
     const r = await sb.from("dishes").insert({
@@ -5881,9 +5902,18 @@ async function autoLoeschen(){
 }
 
 async function gerichtSpeichern(){
+  // Der zweite Tipp auf Speichern hätte sonst eine zweite Zeile angelegt.
+  if(state.busy) return;
   gerichtLesen();
   const g = state.gericht, name = g.name.trim();
   if(!name) return;
+  const schon = gerichtMitNamen(name, g.id);
+  if(schon){
+    const ja = await frage({ titel:"„" + schon.name + "“ gibt es schon",
+      text:"Zwei Gerichte mit demselben Namen lassen sich in den Listen nicht auseinanderhalten.",
+      knopf:"Trotzdem anlegen" });
+    if(!ja || !state.gericht) return;
+  }
   const dauer = parseInt(g.dauer_min, 10);
   const zeile = {
     name:name,
@@ -5891,14 +5921,16 @@ async function gerichtSpeichern(){
     dauer_min: dauer > 0 ? dauer : null,
     vegetarisch: !!g.vegetarisch, kinder: !!g.kinder, idee: !!g.idee, notiz: g.notiz.trim()
   };
+  state.busy = true; render();
   try{
     const r = g.id
       ? await sb.from("dishes").update(zeile).eq("id", g.id)
       : await sb.from("dishes").insert(Object.assign({ household_id: state.membership.household_id }, zeile));
     if(r.error) throw r.error;
+    state.busy = false;
     state.gericht = null; chronikPruefen();
     await kuecheLaden(); datenSichern();
-  }catch(err){ setToast(fehlerText(err)); }
+  }catch(err){ state.busy = false; setToast(fehlerText(err)); }
   render();
 }
 async function gerichtLoeschen(){
