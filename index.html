@@ -754,7 +754,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-11-25 09:35";
+const FASSUNG = "2026-11-25 15:02";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -3126,11 +3126,19 @@ function tafelAnsicht(){
       (offen.length ? '<div class="tafelessen offen"><span class="wt"></span>' +
         '<span class="g">Noch offen: ' + offen.map(d => WDS[(d.getDay()+6)%7]).join(" · ") + '</span></div>' : "");
   }
+  // Was ohne festen Tag geplant ist, bleibt stehen, solange es da ist —
+  // auch wenn für heute schon etwas feststeht. Früher hing der ganze Block
+  // daran, dass heute noch leer war: Wer eines der Gerichte auf heute
+  // setzte, sah damit auch alle übrigen verschwinden, obwohl sie weiter
+  // für die Woche eingeplant waren.
+  const heuteSchonEssen = planAm(heute).length > 0;
   const essen = wochenliste +
-  // Steht für heute nichts fest, zeigt die Tafel, was für die Woche geplant ist.
-  (vorrat.length && !planAm(heute).length ? '<div class="tafelvorrat"><b>Diese Woche geplant</b>' +
-      '<span class="hinweis">Antippen heißt: das kochen wir heute.</span>' +
-      vorrat.map(tafelVorratKarte).join("") + '</div>' : "");
+  (vorrat.length
+    ? '<div class="tafelvorrat"><b>' + (heuteSchonEssen ? "Ohne festen Tag" : "Diese Woche geplant") + '</b>' +
+      '<span class="hinweis">' +
+        (heuteSchonEssen ? "diese Woche noch offen" : "Antippen heißt: das kochen wir heute.") + '</span>' +
+      vorrat.map(tafelVorratKarte).join("") + '</div>'
+    : "");
   const einkauf = einkaufsliste(), nochOffen = einkauf ? eintraegeVon(einkauf).filter(e => !e.erledigt).length : 0;
   // Am Handy sieht man Uhrzeit und Datum ohnehin im Gerät.
   return '<div class="tafel">' +
@@ -3384,17 +3392,22 @@ function rail(){
     '</div>';
   };
   const offeneAufgaben = aufgabenAn(heute).filter(a => !abgehakt(a, heute));
+  const essenAbschnitt = (titel, liste) => liste.length
+    ? '<div class="railsec"><h2>' + titel + '</h2>' +
+        liste.map(e => '<span class="railessen">' + esc(planName(e)) + '</span>').join("") + '</div>'
+    : "";
   return '<aside class="rail">' +
     blk("Heute · " + heute.getDate() + ". " + MONATE[heute.getMonth()], heute) +
     (offeneAufgaben.length
       ? '<div class="railsec"><h2>Aufgaben heute</h2>' +
           offeneAufgaben.map(a => aufgabeZeile(a, heute, true)).join("") + '</div>'
       : "") +
-    (planAm(heute).length || planVorrat(mondayOf(heute)).length
-      ? '<div class="railsec"><h2>' + (planAm(heute).length ? "Essen heute" : "Diese Woche geplant") + '</h2>' +
-          (planAm(heute).length ? planAm(heute) : planVorrat(mondayOf(heute)))
-            .map(e => '<span class="railessen">' + esc(planName(e)) + '</span>').join("") + '</div>'
-      : "") +
+    // Beides, wenn es beides gibt: das Essen von heute und was sonst noch
+    // für die Woche eingeplant ist. Vorher stand hier ein entweder-oder —
+    // sobald heute etwas feststand, war der Rest der Woche unsichtbar.
+    essenAbschnitt("Essen heute", planAm(heute)) +
+    essenAbschnitt(planAm(heute).length ? "Ohne festen Tag" : "Diese Woche geplant",
+                   planVorrat(mondayOf(heute))) +
     blk("Morgen · " + morgen.getDate() + ". " + MONATE[morgen.getMonth()], morgen) +
   '</aside>';
 }
