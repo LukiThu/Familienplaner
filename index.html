@@ -697,10 +697,53 @@ input[type=file]{width:100%;font-size:14px;padding:9px 11px;border:1px dashed va
 <body>
 <div id="app"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Die Bibliothek kommt von einem fremden Server. Feste Fassung plus
+     Prüfsumme: ohne beides lädt ein Gerät beim ersten Start ungeprüft,
+     was dort gerade liegt. Eine offene Hauptversion wäre dafür untauglich
+     — jede neue Unterfassung hätte eine andere Prüfsumme und flöge raus.
+     Aktualisieren, von Hand und mit Bedacht:
+       1. aktuelle Fassung: Antwortkopf "x-jsd-version" der offenen Adresse
+       2. Prüfsumme der festen Adresse bilden:
+          curl -s ADRESSE | openssl dgst -sha384 -binary | openssl base64 -A
+       3. Adresse und integrity hier UND in sw.js (BIBLIOTHEK) eintragen -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.2/dist/umd/supabase.js"
+        integrity="sha384-A97u3Qnt9GZHURO9YJZRe7VQgGUeFzcv6I1oIGnUTxQrCxnpQMwR0/G8F2zt9abZ"
+        crossorigin="anonymous"></script>
 <script>
 (function(){
 "use strict";
+
+/* =========================================================
+   0. Sicherheitsnetz
+   Scheitert der Start, darf das nicht in einer weißen Seite enden:
+   Am Wandtablet gibt es keine Tastatur, um den Gerätespeicher zu
+   leeren. Steht noch nichts auf dem Bildschirm, kommt hier eine
+   lesbare Meldung samt Ausweg hin.
+   ========================================================= */
+window.addEventListener("error", function(ereignis){
+  if(!ereignis || !ereignis.message) return;          // Bilder, Schriften … zählen nicht
+  const app = document.getElementById("app");
+  if(!app || app.innerHTML) return;                   // die App läuft schon
+  app.innerHTML = '<div class="center"><div class="card">' +
+    '<div class="brand"><span class="mark"></span>Familienplaner</div>' +
+    '<h1>Start fehlgeschlagen</h1>' +
+    '<p class="hint">Der Planer konnte nicht starten. Eure Daten liegen auf dem Server — ' +
+      'den Zwischenspeicher dieses Geräts zu leeren kostet also nichts und hilft meistens. ' +
+      'Besteht gerade keine Verbindung, hilft es, es später noch einmal zu versuchen.</p>' +
+    '<div class="err"></div>' +
+    '<button class="btn primary" type="button" id="not-leeren">Zwischenspeicher leeren und neu laden</button>' +
+    '<button class="btn ghost" type="button" id="not-laden">Nur neu laden</button>' +
+  '</div></div>';
+  const meldung = app.querySelector(".err");
+  if(meldung) meldung.textContent = String(ereignis.message);
+  const leeren = document.getElementById("not-leeren");
+  if(leeren) leeren.addEventListener("click", function(){
+    try{ localStorage.clear(); }catch(_){}
+    location.reload();
+  });
+  const laden = document.getElementById("not-laden");
+  if(laden) laden.addEventListener("click", function(){ location.reload(); });
+});
 
 /* =========================================================
    1. Zugangsdaten — hier eintragen
@@ -711,7 +754,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-11-25 08:28";
+const FASSUNG = "2026-11-25 09:35";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -757,7 +800,6 @@ function addMonths(d,n){
   t.setDate(Math.min(day,last));
   return t;
 }
-const addYears = (d,n)=> addMonths(d, n*12);
 const mondayOf = d => addDays(startOfDay(d), -((d.getDay()+6)%7));
 const sameDay  = (a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
 const pad = n => String(n).padStart(2,"0");
@@ -774,6 +816,18 @@ function fromInputs(dateStr, timeStr){
    ========================================================= */
 const sb = (SUPABASE_URL.indexOf("HIER_") === 0) ? null
          : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Ein beschädigter Eintrag im Gerätespeicher darf den Start nicht
+// verhindern — lieber ohne Filter weitermachen als mit weißer Seite.
+function idsAusSpeicher(schluessel){
+  try{
+    const wert = JSON.parse(localStorage.getItem(schluessel) || "[]");
+    return new Set(Array.isArray(wert) ? wert.filter(x => typeof x === "string") : []);
+  }catch(e){
+    try{ localStorage.removeItem(schluessel); }catch(_){}
+    return new Set();
+  }
+}
 
 const state = {
   ready:false, session:null, membership:null, household:null,
@@ -792,7 +846,7 @@ const state = {
       : (localStorage.getItem("fp.view") || "monat"),
   standby:false,
   cursor: new Date(),
-  hidden: new Set(JSON.parse(localStorage.getItem("fp.hidden") || "[]")),
+  hidden: idsAusSpeicher("fp.hidden"),
   feiertage: localStorage.getItem("fp.feiertage") !== "0",
   dialog:null, settings:false, importer:null, tagDetail:null, vorlagenListe:false, vorlagenAlle:false, vorlage:null,
   frage:null, ladefehler:null, tablet: localStorage.getItem("fp.tablet") === "1",
@@ -807,6 +861,21 @@ function setToast(msg){
   toastTimer = setTimeout(()=>{ state.toast=null; render(); }, 2600);
 }
 function memberById(id){ return state.members.find(m=>m.id===id) || null; }
+
+// Wer aus dem Haushalt entfernt wird, soll nichts mehr verstecken: seine
+// Kennung bliebe sonst für immer im Filter stehen — und dazu gibt es keinen
+// Chip mehr, mit dem man sie wieder einschalten könnte. Wird nach jedem
+// Laden der Mitglieder aufgerufen.
+function filterAufraeumen(){
+  if(!state.hidden.size || !state.members.length) return;
+  let weg = false;
+  Array.from(state.hidden).forEach(id => {
+    if(!memberById(id)){ state.hidden.delete(id); weg = true; }
+  });
+  if(weg){
+    try{ localStorage.setItem("fp.hidden", JSON.stringify([...state.hidden])); }catch(e){}
+  }
+}
 
 /* =========================================================
    4. Daten laden
@@ -938,6 +1007,7 @@ async function loadAll(){
   if(mem.error) throw mem.error;
   state.household = hh.data;
   state.members = mem.data || [];
+  filterAufraeumen();
   state.events  = ev;
   state.fenster = fenster;
   state.templates = tpl.error ? [] : (tpl.data || []);
@@ -981,7 +1051,7 @@ function refreshQuiet(){
         termineAbfragen(hid, f.von, f.bis),
         sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
       ]);
-      if(!mem.error) state.members = mem.data || [];
+      if(!mem.error){ state.members = mem.data || []; filterAufraeumen(); }
       state.events = ev;
       await aufgabenLaden();
       await listenLaden();
@@ -1038,12 +1108,16 @@ function feiertagAn(d){
 /* =========================================================
    6. Termine: Serien auflösen
    ========================================================= */
-function naechsteWiederholung(d, art){
-  if(art === "taeglich")              return addDays(d,1);
-  if(art === "woechentlich")          return addDays(d,7);
-  if(art === "zweiwoechentlich")      return addDays(d,14);
-  if(art === "monatlich")             return addMonths(d,1);
-  if(art === "jaehrlich")             return addYears(d,1);
+// Das i-te Vorkommen einer Serie — immer vom Beginn weg gerechnet, nie vom
+// Vorgänger. Vom Vorgänger aus zu rechnen driftet: der 31. Jänner wird im
+// Februar auf den 28. gekappt, und ab dann bliebe es für immer der 28.
+// Ebenso rutschte der 29. Februar nach einem Schaltjahr nie wieder zurück.
+function vorkommenNr(s0, art, i){
+  if(art === "taeglich")              return addDays(s0, i);
+  if(art === "woechentlich")          return addDays(s0, i * 7);
+  if(art === "zweiwoechentlich")      return addDays(s0, i * 14);
+  if(art === "monatlich")             return addMonths(s0, i);
+  if(art === "jaehrlich")             return addMonths(s0, i * 12);
   return null;
 }
 
@@ -1070,31 +1144,35 @@ function occurrences(ev, from, to){
     return out;
   }
   const bis = ev.wiederholung_bis ? endOfDay(parseYmd(ev.wiederholung_bis)) : null;
-  let cur = new Date(s0);
-  // Bei täglichen und wöchentlichen Serien gleich in die Nähe springen,
-  // statt Jahre in Einzelschritten durchzuzählen.
-  const periode = { taeglich:1, woechentlich:7, zweiwoechentlich:14 }[ev.wiederholung];
-  if(periode && from > s0){
-    const tage = Math.floor((from - s0) / 86400000);
-    const k = Math.max(0, Math.floor(tage / periode) - 1);
-    if(k) cur = addDays(cur, k * periode);
+  // Gleich in die Nähe springen, statt Jahre in Einzelschritten
+  // durchzuzählen — eine Lücke Sicherheitsabstand bleibt.
+  let i = 0;
+  if(from > s0){
+    const periode = { taeglich:1, woechentlich:7, zweiwoechentlich:14 }[ev.wiederholung];
+    if(periode){
+      i = Math.max(0, Math.floor(Math.floor((from - s0) / 86400000) / periode) - 1);
+    }else{
+      const monate = (from.getFullYear() - s0.getFullYear()) * 12 + (from.getMonth() - s0.getMonth());
+      i = Math.max(0, Math.floor(monate / (ev.wiederholung === "jaehrlich" ? 12 : 1)) - 1);
+    }
   }
-  for(let i=0; i<800; i++){
+  for(let n=0; n<800; n++, i++){
+    const cur = vorkommenNr(s0, ev.wiederholung, i);
+    if(!cur) break;
     if(bis && cur > bis) break;
     if(cur > to) break;
     const e = new Date(cur.getTime() + dur);
     // Einzeln abgesagte Tage fallen aus der Serie heraus.
-    if(e >= from && ausnahmen.indexOf(ymd(cur)) < 0) out.push({ ev, s:new Date(cur), e });
-    const weiter = naechsteWiederholung(cur, ev.wiederholung);
-    if(!weiter) break;
-    cur = weiter;
+    if(e >= from && ausnahmen.indexOf(ymd(cur)) < 0) out.push({ ev, s:cur, e });
   }
   return out;
 }
 
 function visible(ev){
   if(state.hidden.size === 0) return true;
-  const ids = ev.member_ids || [];
+  // Nur Zuordnungen zählen, die es noch gibt — wie in farbenOf und
+  // kuerzelOf. Ein entferntes Mitglied darf seine Termine nicht mitnehmen.
+  const ids = (ev.member_ids || []).filter(id => memberById(id));
   if(ids.length === 0) return true;                 // Termine ohne Zuordnung immer zeigen
   return ids.some(id => !state.hidden.has(id));
 }
@@ -1159,15 +1237,26 @@ function kontrastfarbe(hex){
   return L > 0.18 ? "#17201C" : "#FFFFFF";
 }
 
+// Die Farbe eines Mitglieds landet in einem style-Attribut. Dort zählt
+// nicht nur, dass nichts aus dem Attribut ausbricht — schon ein Semikolon
+// im Wert würde weitere CSS-Regeln einschmuggeln. Deshalb wird hier nicht
+// maskiert, sondern geprüft: nur echte Farbwerte kommen durch, alles
+// andere gilt als „keine Farbe“. Der Farbwähler liefert ohnehin nur solche.
+const FARBMUSTER = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+function farbwert(hex){
+  const c = String(hex == null ? "" : hex).trim();
+  return FARBMUSTER.test(c) ? c : null;
+}
+
 // Hintergrund und Schrift eines Eintrags: eine Person = ihre Farbe,
 // mehrere = Akzentfarbe, niemand zugeordnet = neutral.
 function farbenOf(ev){
   const ids = (ev.member_ids || []).filter(id => memberById(id));
   if(ids.length === 1){
-    const c = memberById(ids[0]).farbe;
-    return "--c-bg:" + c + ";--c-fg:" + kontrastfarbe(c);
+    const c = farbwert(memberById(ids[0]).farbe);
+    if(c) return "--c-bg:" + c + ";--c-fg:" + kontrastfarbe(c);
   }
-  if(ids.length > 1) return "--c-bg:var(--accent);--c-fg:var(--accent-text)";
+  if(ids.length >= 1) return "--c-bg:var(--accent);--c-fg:var(--accent-text)";
   return "--c-bg:var(--surface-2);--c-fg:var(--text)";
 }
 
@@ -1312,13 +1401,8 @@ function serieAbbilden(rr, start){
   }else if(rr.COUNT){
     const n = parseInt(rr.COUNT, 10);
     if(n > 0 && res.art !== "keine"){
-      let d = new Date(start);
-      for(let i = 1; i < n; i++){
-        const w = naechsteWiederholung(d, res.art);
-        if(!w) break;
-        d = w;
-      }
-      res.bis = ymd(d);
+      const letzter = vorkommenNr(new Date(start), res.art, n - 1);
+      if(letzter) res.bis = ymd(letzter);
     }
   }
   return res;
@@ -1469,8 +1553,9 @@ function ueberfaellig(){
   ).sort((x,y) => x.faellig_am < y.faellig_am ? -1 : 1);
 }
 function sichtbarFuerFilter(a){
-  const ids = a.member_ids || [];
-  if(!ids.length || !state.hidden.size) return true;
+  if(!state.hidden.size) return true;
+  const ids = (a.member_ids || []).filter(id => memberById(id));
+  if(!ids.length) return true;
   return ids.some(id => !state.hidden.has(id));
 }
 function aufgabenAn(tag){
@@ -1543,8 +1628,10 @@ function artikelZu(text){
   const k = eintragKern(text);
   return k ? (state.artikel.find(a => eintragKern(a.name) === k) || null) : null;
 }
-// Jeder Eintrag der Einkaufsliste landet im Artikelstamm — auch wenn der
+// Von Hand getippte Einträge landen im Artikelstamm — auch wenn der
 // Eintrag später gelöscht wird, bleiben Name und Ladenbereich erhalten.
+// Nicht gerufen wird das aus vorratFehlt, vorraeteAufListe und
+// wochenEinkaufAufListe: dort stehen Name und Ort schon am Vorrat.
 async function artikelMerken(text, bereich){
   const name = ohneMenge(text); if(!name) return;
   const da = artikelZu(name);
@@ -1696,6 +1783,7 @@ function datenLaden(){
     state.fuelings   = d.fuelings   || [];
     state.fenster    = d.fenster ? { von:new Date(d.fenster.von), bis:new Date(d.fenster.bis) } : null;
     state.stand      = d.stand || null;
+    filterAufraeumen();
     return true;
   }catch(e){ return false; }
 }
@@ -1912,8 +2000,18 @@ function renderImHintergrund(){
   if(state.tankung && $("#tk-km")) tankungLesen();
   if(state.vorrat && $("#vo-name")) vorratLesen();
   if(state.gericht && $("#ge-name")) gerichtLesen();
+  if(state.listeDialog && $("#li-name")) listeLesen();
+  if(state.artikelDialog && $("#ar-name")) artikelLesen();
+  if(state.autoDialog && $("#au-name")) autoLesen();
+  if(state.wochenEinkauf) wochenEinkaufLesen();
   if(state.zutatDialog && $("#zu-ziel")) state.zutatDialog.ziel = $("#zu-ziel").value;
   if(state.planDialog && $("#plan-suche")) state.planDialog.suche = $("#plan-suche").value;
+  if(state.planDatum && $("#pd-datum")) state.planDatum.datum = $("#pd-datum").value;
+  if(state.suche && $("#such-feld")) state.suche.text = $("#such-feld").value;
+  if(state.wuerfel && $("#wuerfel-tag")) state.wuerfel.tag = $("#wuerfel-tag").value;
+  // Die Einstellungen brauchen hier nichts: render() sammelt deren Felder
+  // selbst ein und setzt sie wieder ein — nötig, weil sie nicht nur beim
+  // Abgleich, sondern bei jedem Neuzeichnen zurückfielen.
   render();
 }
 
@@ -1948,6 +2046,13 @@ function render(){
   // Auch offene Fenster sollen stehen bleiben: Speichert man mitten in den
   // Einstellungen etwas, springt sonst alles wieder nach oben.
   const fensterStand = $$(".backdrop").map(b => b.scrollTop);
+  // Die Einstellungen sind das einzige Fenster, dessen Felder nirgends im
+  // Zustand stehen — sie werden erst beim Speichern aus dem Dokument
+  // gelesen. Jedes Neuzeichnen setzte sie damit auf den gespeicherten
+  // Stand zurück: eine Rückfrage, eine gespeicherte Vorlage, ein Toast,
+  // und der halb getippte Name war weg. Also einsammeln wie Fokus und
+  // Scrollstelle darüber — und unten wieder einsetzen.
+  const einstFelder = einstellungenEinsammeln();
   if(!sb){ app.innerHTML = viewConfigFehlt(); return; }
   if(!state.ready){ app.innerHTML = '<div class="center"><p class="hint">Wird geladen …</p></div>'; return; }
   if(!state.session){ app.innerHTML = viewLogin(); focusFirst(); return; }
@@ -2000,6 +2105,7 @@ function render(){
   const neuerInhalt = $(".content");
   if(neuerInhalt && scrollStand) neuerInhalt.scrollTop = scrollStand;
   $$(".backdrop").forEach(function(b, i){ if(fensterStand[i]) b.scrollTop = fensterStand[i]; });
+  einstellungenEinsetzen(einstFelder);
   letzteAnsicht = schluessel;
   if(state.frage && state.frage.feld !== null){
     setTimeout(function(){ const e = $("#frage-feld"); if(e){ e.focus(); e.select(); } }, 30);
@@ -2156,7 +2262,7 @@ function topbar(){
   const chipsZeigen = mitDatum && (state.filterOffen || filterAn);
 
   const chips = state.members.map(m =>
-    '<button class="fchip" data-act="filter" data-id="' + m.id + '" aria-pressed="' + (!state.hidden.has(m.id)) + '" style="--c:' + esc(m.farbe) + '">' +
+    '<button class="fchip" data-act="filter" data-id="' + m.id + '" aria-pressed="' + (!state.hidden.has(m.id)) + '" style="--c:' + (farbwert(m.farbe) || "var(--accent)") + '">' +
       '<span class="dot"></span>' + esc(m.kuerzel || m.name) + '</button>').join("");
 
   const hauptTab = (b, name) =>
@@ -3297,7 +3403,7 @@ function rail(){
 function dialogTermin(){
   const d = state.dialog;
   const knopf = m =>
-    '<button type="button" data-act="who" data-id="' + m.id + '" aria-pressed="' + (d.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+    '<button type="button" data-act="who" data-id="' + m.id + '" aria-pressed="' + (d.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + (farbwert(m.farbe) || "var(--accent)") + '">' +
       '<span class="dot"></span>' + esc(m.name) + '</button>';
   const whos = personen().map(knopf).join("");
   const kats = kategorien().map(knopf).join("");
@@ -3393,6 +3499,57 @@ function bereichZeile(name, alt, was){
     '<button class="btn icon ghost" type="button" data-act="bereich-runter" aria-label="nach unten">&#8595;</button>' +
     '<button class="btn icon danger" type="button" data-act="bereich-weg" aria-label="entfernen">&#10005;</button>' +
   '</div>';
+}
+
+// Alles, was in den Einstellungen getippt sein kann, als einfaches
+// Päckchen. Wiedergefunden wird jedes Feld über eine Kennung, die ein
+// Neuzeichnen übersteht: die eigene id, bei den Personen die Zeile plus
+// der Feldname. Die beiden Listen kommen als Ganzes mit — dort lassen
+// sich Zeilen anlegen, entfernen und umsortieren, da hilft keine Position.
+function einstellungenEinsammeln(){
+  if(!state.settings || !document.getElementById("st-hh")) return null;
+  const wert = sel => { const el = $(sel); return el ? el.value : null; };
+  const zeilen = id => {
+    const box = document.getElementById(id);
+    if(!box) return null;
+    return $$(".bereichrow", box).map(r => {
+      const f = r.querySelector("input");
+      return { alt: r.dataset.alt || "", neu: f ? f.value : "" };
+    });
+  };
+  return {
+    hh: wert("#st-hh"),
+    ich: wert("#st-ich"),
+    mitglieder: $$(".memberrow").map(r => ({
+      mid: r.dataset.mid,
+      felder: $$("[data-f]", r).map(f => ({ name: f.dataset.f, wert: f.value }))
+    })),
+    orte: zeilen("orteliste"),
+    bereiche: zeilen("bereichliste")
+  };
+}
+
+function einstellungenEinsetzen(paket){
+  if(!paket || !state.settings) return;
+  const setz = (sel, w) => { const el = $(sel); if(el && w != null) el.value = w; };
+  setz("#st-hh", paket.hh);
+  setz("#st-ich", paket.ich);
+  paket.mitglieder.forEach(m => {
+    // Eine Person, die inzwischen entfernt wurde, hat keine Zeile mehr.
+    const row = $('.memberrow[data-mid="' + m.mid + '"]');
+    if(!row) return;
+    m.felder.forEach(f => {
+      const el = row.querySelector('[data-f="' + f.name + '"]');
+      if(el) el.value = f.wert;
+    });
+  });
+  // Neu hinzugekommene Personen bleiben so, wie sie gezeichnet wurden.
+  const liste = (id, zeilen, was) => {
+    const box = document.getElementById(id);
+    if(box && zeilen) box.innerHTML = zeilen.map(z => bereichZeile(z.neu, z.alt, was)).join("");
+  };
+  liste("orteliste", paket.orte, "Ort");
+  liste("bereichliste", paket.bereiche);
 }
 
 function dialogEinstellungen(){
@@ -3591,8 +3748,9 @@ function dialogImport(){
 // Vorlagen richten sich nach denselben Farbchips wie die Termine.
 function sichtbareVorlagen(){
   return state.templates.filter(v => {
-    const ids = (v.member_ids || []);
-    if(!ids.length || !state.hidden.size) return true;
+    if(!state.hidden.size) return true;
+    const ids = (v.member_ids || []).filter(id => memberById(id));
+    if(!ids.length) return true;
     return ids.some(id => !state.hidden.has(id));
   });
 }
@@ -3630,7 +3788,7 @@ function dialogAufgabe(){
       '<input id="auf-titel" type="text" value="' + esc(a.titel) + '" placeholder="Müll rausbringen" required></div>' +
     '<div class="field"><label>Für wen</label><div class="whopick">' +
       personen().map(m =>
-        '<button type="button" data-act="aufgabe-wer" data-id="' + m.id + '" aria-pressed="' + (a.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+        '<button type="button" data-act="aufgabe-wer" data-id="' + m.id + '" aria-pressed="' + (a.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + (farbwert(m.farbe) || "var(--accent)") + '">' +
           '<span class="dot"></span>' + esc(m.name) + '</button>').join("") +
       '</div><span class="hint">Nichts ausgewählt heißt: betrifft alle.</span></div>' +
     '<div class="field"><label>An welchen Tagen</label><div class="whopick">' +
@@ -3934,15 +4092,26 @@ function bedarfText(b){
   if(b.mengen.length === 1) return b.mengen[0] + " " + b.name;
   return b.name + (b.mengen.length ? " (" + b.mengen.join(" + ") + ")" : "");
 }
+// Die Haken stehen nur im Dokument — vor dem Neuzeichnen mitnehmen, sonst
+// springt eine von Hand geänderte Auswahl auf den Vorschlag zurück.
+function wochenEinkaufLesen(){
+  const w = state.wochenEinkauf; if(!w) return;
+  const kaesten = $$(".bedarfliste input[type=checkbox]");
+  if(!kaesten.length) return;
+  w.wahl = w.wahl || {};
+  kaesten.forEach(c => { if(!c.disabled) w.wahl[c.dataset.key] = c.checked; });
+}
 function dialogWochenEinkauf(){
   const liste = wochenBedarf();
+  const wahl = (state.wochenEinkauf && state.wochenEinkauf.wahl) || {};
   const zeile = b =>
     '<label class="check bedarf' + (b.drauf ? " drauf" : "") + '">' +
-      '<input type="checkbox" data-key="' + esc(b.key) + '"' + (b.drauf ? " disabled" : (b.fehlt ? " checked" : "")) + '>' +
+      '<input type="checkbox" data-key="' + esc(b.key) + '"' +
+        (b.drauf ? " disabled" : (((b.key in wahl) ? wahl[b.key] : b.fehlt) ? " checked" : "")) + '>' +
       '<span><b>' + esc(bedarfText(b)) + '</b>' +
         '<small>' + (b.drauf ? "steht schon auf der Liste"
             : !b.vorrat ? "frisch"
-            : gezaehlt(b.vorrat) ? "im Lager: " + bestandText(b.vorrat)
+            : gezaehlt(b.vorrat) ? "im Lager: " + esc(bestandText(b.vorrat))
             : "im Lager, nicht gezählt") + ' · ' + esc(b.gerichte.join(", ")) + '</small></span>' +
     '</label>';
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="wochen-einkauf-los">' +
@@ -3983,6 +4152,11 @@ function dialogWuerfel(){
   '</div></div>';
 }
 
+function artikelLesen(){
+  const a = state.artikelDialog; if(!a) return;
+  const n = $("#ar-name");    if(n) a.name = n.value;
+  const b = $("#ar-bereich"); if(b) a.bereich = b.value;
+}
 function dialogArtikel(){
   const a = state.artikelDialog;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="artikel-speichern">' +
@@ -4057,6 +4231,12 @@ function dialogTankung(){
   '</form></div>';
 }
 
+function autoLesen(){
+  const a = state.autoDialog; if(!a) return;
+  const g = (sel, f) => { const el = $(sel); if(el) a[f] = el.value; };
+  g("#au-name","name"); g("#au-kz","kennzeichen");
+  g("#au-sprit","kraftstoff"); g("#au-tank","tankgroesse");
+}
 function dialogAuto(){
   const a = state.autoDialog;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="auto-speichern">' +
@@ -4110,7 +4290,7 @@ function dialogPlanDatum(){
         !istVorrat(e) && e.tag === ymd(d))).join("") +
     '</div>' +
     '<div class="field"><label for="pd-datum">Anderes Datum</label>' +
-      '<input id="pd-datum" type="date" value="' + esc(istVorrat(e) ? ymd(heute) : e.tag) + '"></div>' +
+      '<input id="pd-datum" type="date" value="' + esc(p.datum || (istVorrat(e) ? ymd(heute) : e.tag)) + '"></div>' +
     '<div class="actions">' +
       '<span class="spacer"></span>' +
       '<button class="btn" type="button" data-act="schliessen">Abbrechen</button>' +
@@ -4119,6 +4299,11 @@ function dialogPlanDatum(){
   '</form></div>';
 }
 
+function listeLesen(){
+  const l = state.listeDialog; if(!l) return;
+  const n = $("#li-name");    if(n) l.name = n.value;
+  const e = $("#li-einkauf"); if(e) l.ist_einkauf = e.checked;
+}
 function dialogListe(){
   const l = state.listeDialog;
   return '<div class="backdrop" data-act="backdrop"><form class="modal schmal" data-act="liste-speichern">' +
@@ -4206,7 +4391,7 @@ function dialogVorlage(){
       '<input id="vl-titel" type="text" value="' + esc(v.titel) + '" placeholder="L1" required></div>' +
     '<div class="field"><label>Für wen</label><div class="whopick">' +
       personen().map(m =>
-        '<button type="button" data-act="vorlage-wer" data-id="' + m.id + '" aria-pressed="' + (v.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + esc(m.farbe) + '">' +
+        '<button type="button" data-act="vorlage-wer" data-id="' + m.id + '" aria-pressed="' + (v.member_ids.indexOf(m.id) >= 0) + '" style="--c:' + (farbwert(m.farbe) || "var(--accent)") + '">' +
           '<span class="dot"></span>' + esc(m.name) + '</button>').join("") +
       '</div><span class="hint">Beim Eintragen zeigt die App zuerst die eigenen Vorlagen.</span></div>' +
     '<div class="row">' +
@@ -4295,7 +4480,10 @@ function neuerDialog(datum, ev, occ){
       wiederholung:ev.wiederholung||"keine", wiederholung_bis:ev.wiederholung_bis||null,
       member_ids:(ev.member_ids||[]).slice(), error:null,
       erinnerung: meineErinnerung(ev.id) ? String(meineErinnerung(ev.id).vorlauf_min) : "",
-      occ: occ || null, umfang: "serie"
+      // serieVd ist der Beginn der Serie. Die Datumsfelder zeigen ihn,
+      // solange „Ganze Serie“ gilt; bei „Nur dieser Tag“ wird auf das
+      // angetippte Vorkommen umgestellt und hierher zurück.
+      occ: occ || null, umfang: "serie", serieVd: ymd(s)
     };
   }
   const d = datum ? parseYmd(datum) : startOfDay(new Date());
@@ -4502,8 +4690,23 @@ async function aktion(act, el){
     case "ganztags":
       dialogLesen(); state.dialog.ganztags = el.checked; state.dialog.erinnerung = ""; return render();
 
-    case "umfang":
-      dialogLesen(); state.dialog.umfang = el.dataset.w; return render();
+    case "umfang": {
+      dialogLesen();
+      const d = state.dialog, w = el.dataset.w;
+      // Die Datumsfelder sollen zeigen, was man gerade bearbeitet: bei
+      // „Nur dieser Tag“ den angetippten Termin, bei „Ganze Serie“ wieder
+      // deren Beginn. Sonst legt das Speichern den gelösten Einzeltermin
+      // am Serienbeginn an, statt an dem Tag, der auf dem Knopf steht.
+      // Das Ende rutscht um dieselbe Zahl von Tagen mit.
+      const ziel = w === "einzel" ? d.occ : d.serieVd;
+      if(ziel && d.vd && ziel !== d.vd){
+        const tage = Math.round((startOfDay(parseYmd(ziel)) - startOfDay(parseYmd(d.vd))) / 86400000);
+        d.vd = ziel;
+        if(d.bd) d.bd = ymd(addDays(parseYmd(d.bd), tage));
+      }
+      d.umfang = w;
+      return render();
+    }
 
     case "who": {
       dialogLesen();
@@ -4640,6 +4843,8 @@ async function aktion(act, el){
     }
     case "plan-datum-woche": {
       if(!state.planDatum) return;
+      const feld = $("#pd-datum");
+      if(feld) state.planDatum.datum = feld.value;
       const mo = state.planDatum.woche ? parseYmd(state.planDatum.woche) : planMontag();
       state.planDatum.woche = ymd(addDays(mo, 7 * (+el.dataset.d)));
       return render();
@@ -6213,7 +6418,7 @@ async function neuLaden(){
     sb.from("templates").select("*").eq("household_id", hid).order("sortierung").order("titel")
   ]);
   if(hh.data)  state.household = hh.data;
-  if(mem.data) state.members = mem.data;
+  if(mem.data){ state.members = mem.data; filterAufraeumen(); }
   state.events = ev;
   state.fenster = f;
   if(tpl.data) state.templates = tpl.data;

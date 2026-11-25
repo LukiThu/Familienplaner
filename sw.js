@@ -2,8 +2,14 @@
 // Zwei Aufgaben: Erinnerungen anzeigen und die App offline verfügbar halten.
 // Muss neben index.html liegen.
 
-const SPEICHER = "familienplaner-v1";
-const BIBLIOTHEK = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js";
+// Beim Hochzählen wirft der activate-Teil den alten Speicher weg. Nötig,
+// wenn dort Dateien unter Adressen liegen, die es nicht mehr gibt — etwa
+// die Bibliothek unter ihrer vorigen Fassungsnummer.
+const SPEICHER = "familienplaner-v2";
+// Muss Zeichen für Zeichen zur Adresse im script-Tag von index.html passen —
+// sonst läuft die Bibliothek nicht mehr über den Zwischenspeicher und fehlt
+// ohne Netz. Beim Aktualisieren also beide Stellen ändern.
+const BIBLIOTHEK = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.2/dist/umd/supabase.js";
 // Nur eigene Dateien vorab ablegen. Die Bibliothek landet beim ersten
 // Laden über den fetch-Teil im Speicher — hinge das Einrichten an einem
 // fremden Server, käme es ohne Netz gar nicht erst zustande.
