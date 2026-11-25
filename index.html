@@ -384,9 +384,18 @@ button.pill:hover{filter:brightness(1.08)}
 .plantag.vorrat .plantag-kopf span{color:var(--accent)}
 .plantag.leer .plantag-kopf{opacity:.75}
 .planeintrag .gekocht{color:var(--accent)}
-.tafelvorrat{display:flex;flex-direction:column;gap:2px;margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
-.tafelvorrat b{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
-.tafelvorrat span{font-size:15px;font-weight:600}
+.tafelvorrat{display:flex;flex-direction:column;gap:8px;margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.tafelvorrat > b{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tafelvorrat > .hinweis{font-size:12.5px;color:var(--muted);margin-top:-6px}
+.tafelgericht{
+  display:flex;flex-direction:column;gap:5px;width:100%;text-align:left;
+  padding:11px 13px;border:1px solid var(--line);border-radius:11px;
+  background:var(--surface-3);font:inherit;color:inherit;cursor:pointer;
+}
+.tafelgericht:hover{border-color:var(--accent)}
+.tafelgericht .kopf{display:flex;align-items:baseline;gap:10px}
+.tafelgericht .kopf b{flex:1 1 auto;min-width:0;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tafelgericht .kochen{flex:none;font-size:12.5px;font-weight:700;color:var(--accent)}
 .mzleer{
   display:block;width:100%;text-align:left;padding:9px 0;border:none;background:none;
   font:inherit;font-size:14px;color:var(--muted);cursor:pointer;
@@ -453,6 +462,8 @@ button.pill:hover{filter:brightness(1.08)}
 .tafelessen.heute{background:var(--accent-soft);border-radius:8px;border-bottom-color:transparent}
 .tafelessen.heute .wt{color:var(--accent)}
 .tafelessen.vorbei{opacity:.5}
+.tafelessen.offen .wt{color:var(--muted)}
+.tafelessen.offen .g{font-size:14px;font-weight:600;color:var(--muted)}
 .tafeleinkauf{
   margin-top:14px;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line-strong);
   background:var(--surface-3);font:inherit;font-weight:600;color:inherit;cursor:pointer;
@@ -512,11 +523,11 @@ button.pill:hover{filter:brightness(1.08)}
 }
 .gericht:hover{background:var(--surface-3)}
 .gericht h3{margin:0;font-size:16px;letter-spacing:-.01em}
-.gericht .marken{display:flex;gap:5px;flex-wrap:wrap}
-.gericht .marke{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
-.gericht .marke.gruen{background:var(--accent-soft);color:var(--accent)}
+.gericht .marken,.tafelgericht .marken{display:flex;gap:5px;flex-wrap:wrap}
+.gericht .marke,.tafelgericht .marke{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
+.gericht .marke.gruen,.tafelgericht .marke.gruen{background:var(--accent-soft);color:var(--accent)}
 .gericht .zutaten{font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.gericht .fehlt{font-size:13px;font-weight:600;color:var(--danger)}
+.gericht .fehlt,.tafelgericht .fehlt{font-size:13px;font-weight:600;color:var(--danger)}
 .gericht .knapp{font-size:13px;color:var(--knapp)}
 @media (max-width:640px){
   .kuechenleiste.wischbar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -10px;padding:0 10px}
@@ -700,7 +711,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_7X04K5m2J-crpHzkRTStCg_MplddGLp";
 
 // Öffentlicher Teil des Schlüsselpaars für Erinnerungen. Darf im Code
 // stehen — der private Teil liegt ausschließlich in Supabase.
-const FASSUNG = "2026-11-24 21:07";
+const FASSUNG = "2026-11-25 08:28";
 const VAPID_PUBLIC = "BFvl1gLrbc_HoFw_yD8gTfmtCpvDTQZy8vKYgSfKQD1uKkktT9vFU_YaIMOkAS7Z5iKYSecRctfXHQsZuSg4ZkM";
 
 /* =========================================================
@@ -2962,6 +2973,21 @@ function tafelTermin(o){
     (wer ? '<span class="w">' + esc(wer) + '</span>' : "") +
   '</button>';
 }
+// Ein Gericht aus dem Wochenvorrat auf der Tafel: wie die Karten im
+// Reiter Gerichte, aber mit einem Tipp als „das kochen wir heute“.
+function tafelVorratKarte(e){
+  const g = planGericht(e), st = g ? zutatenStand(g) : null;
+  const marken = !g ? "" :
+    (g.dauer_min ? '<span class="marke">' + g.dauer_min + ' Min.</span>' : "") +
+    (g.vegetarisch ? '<span class="marke gruen">vegetarisch</span>' : "") +
+    (g.kinder ? '<span class="marke gruen">Kinder mögen’s</span>' : "");
+  return '<button class="tafelgericht" data-act="plan-gekocht" data-id="' + e.id + '">' +
+    '<span class="kopf"><b>' + esc(planName(e)) + '</b>' +
+      '<span class="kochen">&#10003; heute</span></span>' +
+    (marken ? '<span class="marken">' + marken + '</span>' : "") +
+    (st && st.fehlt.length ? '<span class="fehlt">Fehlt: ' + esc(st.fehlt.map(x => x.name).join(", ")) + '</span>' : "") +
+  '</button>';
+}
 function tafelAnsicht(){
   const heute = new Date(), morgen = addDays(heute, 1);
   const termine = (tag, leer) => {
@@ -2972,15 +2998,33 @@ function tafelAnsicht(){
   const offen = aufgaben.filter(a => !abgehakt(a, heute)), fertig = aufgaben.filter(a => abgehakt(a, heute));
   const mo = mondayOf(heute);
   const vorrat = planVorrat(mo);
-  const essen = [0,1,2,3,4,5,6].map(i => addDays(mo, i)).map(d => {
+  const heuteBeginn = startOfDay(heute);
+  const tage = [0,1,2,3,4,5,6].map(i => addDays(mo, i));
+  const zeile = d => {
     const e = planAm(d);
-    return '<div class="tafelessen' + (sameDay(d, heute) ? " heute" : "") + (d < startOfDay(heute) ? " vorbei" : "") + '">' +
+    return '<div class="tafelessen' + (sameDay(d, heute) ? " heute" : "") + (d < heuteBeginn ? " vorbei" : "") + '">' +
       '<span class="wt">' + WDS[(d.getDay()+6)%7] + '</span>' +
-      '<span class="g">' + (e.length ? esc(e.map(planName).join(" · ")) : "—") + '</span></div>';
-  }).join("") +
+      '<span class="g">' + (e.length ? esc(e.map(planName).join(" · "))
+                                     : (sameDay(d, heute) ? "noch nichts geplant" : "—")) + '</span></div>';
+  };
+  // Am Wandtablet ist Platz für die ganze Woche. Am Handy zählt, was noch
+  // kommt: Vergangenes fällt weg, und die noch leeren Tage stehen
+  // zusammengefasst in einer schmalen Zeile statt in je einer mit „—“.
+  let wochenliste;
+  if(state.tablet){
+    wochenliste = tage.map(zeile).join("");
+  }else{
+    const spaeter = tage.filter(d => d > heuteBeginn);
+    const offen = spaeter.filter(d => !planAm(d).length);
+    wochenliste = [heuteBeginn].concat(spaeter.filter(d => planAm(d).length)).map(zeile).join("") +
+      (offen.length ? '<div class="tafelessen offen"><span class="wt"></span>' +
+        '<span class="g">Noch offen: ' + offen.map(d => WDS[(d.getDay()+6)%7]).join(" · ") + '</span></div>' : "");
+  }
+  const essen = wochenliste +
   // Steht für heute nichts fest, zeigt die Tafel, was für die Woche geplant ist.
   (vorrat.length && !planAm(heute).length ? '<div class="tafelvorrat"><b>Diese Woche geplant</b>' +
-      vorrat.map(e => '<span>' + esc(planName(e)) + '</span>').join("") + '</div>' : "");
+      '<span class="hinweis">Antippen heißt: das kochen wir heute.</span>' +
+      vorrat.map(tafelVorratKarte).join("") + '</div>' : "");
   const einkauf = einkaufsliste(), nochOffen = einkauf ? eintraegeVon(einkauf).filter(e => !e.erledigt).length : 0;
   // Am Handy sieht man Uhrzeit und Datum ohnehin im Gerät.
   return '<div class="tafel">' +
